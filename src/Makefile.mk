@@ -7,6 +7,6 @@
 AM_CPPFLAGS += -I$(top_srcdir)/src -I$(top_builddir)/src
 
 liblmdbio_la_SOURCES += \
-	src/lmdbio.cxx
+	src/lmdbio.cpp
 
 include_HEADERS += src/lmdbio.h
