@@ -63,6 +63,10 @@ public:
 
   ~db(void) {
     MPI_Comm_free(&comm);
+    // close database
+    mdb_cursor_close(mdb_cursor);
+    mdb_dbi_close(mdb_env_, mdb_dbi_);
+    mdb_env_close(mdb_env_);
     delete[] fname;
     delete records;
   }
