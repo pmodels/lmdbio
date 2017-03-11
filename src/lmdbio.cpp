@@ -5,8 +5,9 @@
  */
 
 #include "lmdbio.h"
+#include <map>
 
-void lmdbio::init()
+void lmdbio::db::init()
 {
   // initialize class attributes
   current_batch = -1;
@@ -59,11 +60,11 @@ void lmdbio::init()
 }
 
 // replace this with the model
-void lmdbio::compute_num_readers() {
+void lmdbio::db::compute_num_readers() {
   this->readers = 1;
 }
 
-void lmdbio::compute_fetch_size(bool invalid) {
+void lmdbio::db::compute_fetch_size(bool invalid) {
   int fetch_images = this->batch_size * this->fetch_batch_num; 
   if (phase == TEST_PHASE) {
     this->total_images = this->max_iter * this->batch_size;
@@ -95,7 +96,7 @@ void lmdbio::compute_fetch_size(bool invalid) {
 }
 
 // open the database and initialize a position of a cursor
-void lmdbio::open_db() {
+void lmdbio::db::open_db() {
   int flags = MDB_RDONLY | MDB_NOTLS | MDB_NOLOCK;
   check_lmdb(mdb_env_create(&mdb_env_), "Created environment", false);
   check_lmdb(mdb_env_set_maxreaders(mdb_env_, np), "Set maxreaders", false);
@@ -113,7 +114,7 @@ void lmdbio::open_db() {
   this->cursor = cursor;
 }
 
-void lmdbio::rsize_alltoallv(
+void lmdbio::db::rsize_alltoallv(
     int* s_rsize, int* r_rsize, int* sendcounts, int* senddispls, 
     int* recvcounts, int* recvdispls) {
   int senddispl = 0;
@@ -191,7 +192,7 @@ void lmdbio::rsize_alltoallv(
 }
 
 
-void lmdbio::send_batch(char* batch_bytes, char** sbatch_bytes, 
+void lmdbio::db::send_batch(char* batch_bytes, char** sbatch_bytes, 
     int* s_rsize, int** r_rsize) {
   int count = this->sbatch_size * this->datum_byte_size;
   int* sop;
@@ -238,7 +239,7 @@ void lmdbio::send_batch(char* batch_bytes, char** sbatch_bytes,
 
 }
 
-void lmdbio::read_batch() {
+void lmdbio::db::read_batch() {
   int size = 0;
   int psize = 0;
   int rsize = 0;
@@ -292,7 +293,7 @@ void lmdbio::read_batch() {
   //validate_cursor();
 }
 
-void lmdbio::check_diff_batch() {
+void lmdbio::db::check_diff_batch() {
   int sop[2];
   int rop[2];
   sop[0] = has_diff_data_size ? 1 : 0;
@@ -303,7 +304,7 @@ void lmdbio::check_diff_batch() {
   //LOG(INFO) << "Rank " << rank << " rsize_len " << rsize_len;
 }
 
-void lmdbio::serialize_data(char** batch_bytes, int** s_rsize) {
+void lmdbio::db::serialize_data(char** batch_bytes, int** s_rsize) {
   int offset = 0;
   int count = -1;
   int size = 0;
@@ -372,32 +373,32 @@ void lmdbio::serialize_data(char** batch_bytes, int** s_rsize) {
   }*/
 }
 
-int lmdbio::get_sbatch_size(int sbatch_id) {
+int lmdbio::db::get_sbatch_size(int sbatch_id) {
   int remainder = this->batch_size % np;
   return (this->batch_size / np) + (sbatch_id < remainder ? 1 : 0);
 }
 
-bool lmdbio::is_identical_sbatch_size() {
+bool lmdbio::db::is_identical_sbatch_size() {
   return this->batch_size % np == 0;
 }
 
-bool lmdbio::is_reader(int proc) {
+bool lmdbio::db::is_reader(int proc) {
   return (proc % (np / readers)) == 0;
 }
 
-int lmdbio::recv_group(int proc, int receiver_size) {
+int lmdbio::db::recv_group(int proc, int receiver_size) {
   return proc / receiver_size;
 }
 
-int lmdbio::reader_id(int proc) {
+int lmdbio::db::reader_id(int proc) {
   return proc / (np / readers);
 }
 
-int lmdbio::read_group(int proc, int reader_per_batch) {
+int lmdbio::db::read_group(int proc, int reader_per_batch) {
   return reader_id(proc) % reader_per_batch;
 }
 
-void lmdbio::dist_scatter(char* sbuf, char* rbuf) {
+void lmdbio::db::dist_scatter(char* sbuf, char* rbuf) {
   int sendcount = sbatch_size * this->datum_byte_size;
   //printf("Recvcount %d\n", recvcount);
   //printf("Sendcount %d\n", sendcount);
@@ -420,7 +421,7 @@ void lmdbio::dist_scatter(char* sbuf, char* rbuf) {
   }
 }
 
-void lmdbio::dist_alltoallv(char* sbuf, char* rbuf, 
+void lmdbio::db::dist_alltoallv(char* sbuf, char* rbuf, 
     int* sendcounts, int* senddispls, int* recvcounts, int* recvdispls, 
     int* s_rsize, int* r_rsize) {
   int senddispl = 0;
@@ -539,8 +540,83 @@ void lmdbio::dist_alltoallv(char* sbuf, char* rbuf,
   }
 }
 
-int lmdbio::read_record_batch(void ***records, int *num_records, int **record_sizes)
-{
+void lmdbio::db::parse_sbatch_bytes(char* sbatch_bytes, int* r_rsize) {
+  bool is_end = false;
+  int count = 0;
+  int r_idx = current_batch * rsize_len;
+  int send_batch_num = fetch_batch_num < readers ? 1 
+    : fetch_batch_num / readers;
+  int size = has_diff_data_size ? 0 : this->datum_byte_size;
+  //LOG(INFO) << "Rank " << rank << " parse_sbatch_bytes";
+  if (has_comm) {
+    //int count_size = sbatch_recvcount * current_batch;
+    int count_size = 0;
+    int rsize_lim = rsize_len * (current_batch + 1);
+    if (has_diff_data_size) {
+      int idx = rsize_len - 1;
+      for (int i = 0; i < current_batch; i++) {
+        count_size += r_rsize[rsize_len - 1];
+        idx += rsize_len;
+      }
+    }
+    else {
+      count_size = this->datum_byte_size * this->sbatch_size * current_batch;
+    }
+
+    //create new record
+    num_records = this->sbatch_size;
+    records = (record *) operator new[] (num_records * sizeof(record));
+
+    if (has_comm) {
+      int count_size = 0;
+      int rsize_lim = rsize_len * (current_batch + 1);
+      if (has_diff_data_size) {
+        int idx = rsize_len - 1;
+        for (int i = 0; i < current_batch; i++) {
+          count_size += r_rsize[rsize_len - 1];
+          idx += rsize_len;
+        }
+      }
+      else {
+        count_size = this->datum_byte_size * this->sbatch_size * current_batch;
+      }
+      for (int i = 0; i < this->sbatch_size; i++) {
+        if (has_diff_data_size) {
+          if (!is_end && r_idx < rsize_lim
+              && r_rsize[r_idx] == i % sbatch_size) {
+            size += r_rsize[r_idx + 1];
+            r_idx += 2;
+            is_end = r_rsize[r_idx] == -1;
+            //printf("count %d \n", count);
+          }
+        }
+        new (&records[i]) record();
+        records[i].set_record(sbatch_bytes + count_size, size);
+        count_size += size;
+      }
+    }
+    else {
+      is_end = false;
+      rsize_len = rsize_vec.size();
+      for (int i = 0; i < this->sbatch_size; i++) {
+        if (has_diff_data_size) {
+          if (!is_end && r_idx < rsize_len
+              && rsize_vec[r_idx] == i % sbatch_size) {
+            size += rsize_vec[r_idx + 1];
+            r_idx += 2;
+            is_end = rsize_vec[r_idx] == -1;
+            //printf("count %d \n", count);
+          }
+        }
+        new (&records[i]) record();
+        records[i].set_record(batch_ptrs[i], size);
+      }
+    }
+  }
+}
+
+  int lmdbio::db::read_record_batch(void) 
+  {
   //LOG(INFO) << "Parallel data reader max iter " << max_iter;
   char* sbatch_bytes;
   char* batch_bytes;
@@ -562,6 +638,8 @@ int lmdbio::read_record_batch(void ***records, int *num_records, int **record_si
         if (is_reader(rank)) {
           serialize_data(&batch_bytes, &s_rsize);
         }
+        // send buffer: batch_bytes, receive buffer: sbatch_bytes
+        // send rsize: s_rsize, receive rsize: r_rsize
         send_batch(batch_bytes, &sbatch_bytes, s_rsize, &r_rsize);
         if (is_reader(rank)) {
           delete batch_bytes;
@@ -571,13 +649,14 @@ int lmdbio::read_record_batch(void ***records, int *num_records, int **record_si
       }
       compute_fetch_size(true);
     }
-    //parse_sbatch_bytes(sbatch_bytes, r_rsize);
-    /*if (has_comm) {
+    parse_sbatch_bytes(sbatch_bytes, r_rsize);
+    if (has_comm) {
       delete sbatch_bytes;
       if (has_diff_data_size)
         delete r_rsize;
-    }*/
+    }
   }
-  //LOG(INFO) << "Rank " << rank << " finish read entry";
+
+  num_records = this->sbatch_size;
   return 0;
 }

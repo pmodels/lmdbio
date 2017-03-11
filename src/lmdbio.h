@@ -21,34 +21,66 @@ using std::string;
 #define TEST_PHASE (0)
 #define TRAIN_PHASE (1)
 
-class lmdbio
+namespace lmdbio {
+
+class record {
+public:
+  record()
+  {
+    data = NULL;
+    record_size = 0;
+  }
+
+  ~record() {}
+
+  int get_record_size() { return record_size; }
+  void *get_record() { return data; }
+  void set_record(void* data, int record_size) {
+    this->data = data;
+    this->record_size = record_size;
+  }
+
+private:
+  void *data;
+  int record_size;
+};
+
+class db
 {
 public:
-  lmdbio(MPI_Comm parent_comm, const char *filename, int batch_size, int phase, int max_iter) {
+  db(MPI_Comm parent_comm, const char *filename, int batch_size, int phase, int max_iter) {
     MPI_Comm_dup(parent_comm, &comm);
     fname = strdup(filename);
     this->batch_size = batch_size;
     this->phase = phase;  
     this->max_iter = max_iter;
+    this->num_records = 0;
+    records = NULL;
     init();
     compute_num_readers();
   }
 
-  ~lmdbio(void) {
+  ~db(void) {
     MPI_Comm_free(&comm);
     delete[] fname;
+    delete records;
   }
 
   int read_record_batch(void ***records, int *num_records, int **record_sizes);
 
-  int get_sbatch_size() const {
-    return sbatch_size;
-  }
+  int get_sbatch_size() const { return sbatch_size; }
+
+  int get_batch_size(void) { return batch_size; }
+  int read_record_batch(void);
+  int get_num_records(void) { return get_sbatch_size(); }
+  record *get_record(int i) { return &records[i]; }
 
 private:
   MPI_Comm comm;
   const char *fname;
+  record *records;
   char** batch_ptrs;
+  int num_records;
   int phase;
   void init();
   void compute_num_readers();
@@ -168,6 +200,8 @@ private:
   void* lmdb_value_data() {
     return mdb_value_.mv_data;
   }
+};
+
 };
 
 #endif  /* LMDBIO_H_INCLUDED */
