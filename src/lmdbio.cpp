@@ -6,12 +6,15 @@
 
 #include "lmdbio.h"
 #include <map>
+#include <iostream>
+
+using std::cout;
+using std::endl;
 
 void lmdbio::db::init()
 {
   // initialize class attributes
   current_batch = -1;
-  max_iter = -1;
   has_diff_data_size = false;
   has_comm = true;
   rsize_len = 0;
@@ -36,10 +39,10 @@ void lmdbio::db::init()
     has_comm = false;
   }
 
-  /*LOG(INFO) << "Readers: " << readers;
-  LOG(INFO) << "Batch num: " << fetch_batch_num;
-  LOG(INFO) << "Has diff batch size " << has_diff_batch_size;
-  LOG(INFO) << "Myrank " << rank << " ParallelDataReader is created";*/
+  /*cout << "Readers: " << readers;
+  cout << "Batch num: " << fetch_batch_num;
+  cout << "Has diff batch size " << has_diff_batch_size;
+  cout << "Myrank " << rank << " ParallelDataReader is created";*/
 
   this->total_images = this->max_iter * this->batch_size;
   compute_fetch_size(false);
@@ -69,14 +72,14 @@ void lmdbio::db::compute_fetch_size(bool invalid) {
   if (phase == TEST_PHASE) {
     this->total_images = this->max_iter * this->batch_size;
   }
-  //LOG(INFO) << "Total images: " << this->total_images;
+  //cout << "Total images: " << this->total_images;
   if (this->total_images >= fetch_images) {
-    //LOG(INFO) << "Fetch one or more batch";
+    //cout << "Fetch one or more batch";
     this->fetch_size = fetch_images / readers;
     is_full_batch = true;
   }
   else {
-    //LOG(INFO) << "Fetch less than one batch";
+    //cout << "Fetch less than one batch";
     this->fetch_size = this->total_images / readers;
     this->fetch_batch_num = this->total_images / this->batch_size;
     is_full_batch = false;
@@ -87,10 +90,10 @@ void lmdbio::db::compute_fetch_size(bool invalid) {
   this->fetch_batch_num = fetch_images / this->batch_size;
   this->total_images -= fetch_images; 
   /*if (param_.phase() == caffe::TRAIN) {
-    LOG(INFO) << "Rank " << rank << " New Readers: " << readers;
-    LOG(INFO) << "Rank " << rank << " New Batch num: " << fetch_batch_num;
-    LOG(INFO) << "Rank " << rank << " New Fetch size: " << this->fetch_size;
-    LOG(INFO) << "Rank " << rank << " New Fetch images: " << fetch_images
+    cout << "Rank " << rank << " New Readers: " << readers;
+    cout << "Rank " << rank << " New Batch num: " << fetch_batch_num;
+    cout << "Rank " << rank << " New Fetch size: " << this->fetch_size;
+    cout << "Rank " << rank << " New Fetch images: " << fetch_images
       << " Remaining images: " << this->total_images;
   }*/
 }
@@ -200,10 +203,10 @@ void lmdbio::db::send_batch(char* batch_bytes, char** sbatch_bytes,
   int send_batch_num = fetch_batch_num < readers ? 1 : fetch_batch_num / readers;
   int r_rsize_len = 0;
   int recv_size = 0;
-  //LOG(INFO) << "Rank " << rank << " send batch";
+  //cout << "Rank " << rank << " send batch";
   if (!has_diff_data_size) {
     MPI_Bcast(&this->datum_byte_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    //LOG(INFO) << "Rank " << rank << " bcast size " << this->datum_byte_size;
+    //cout << "Rank " << rank << " bcast size " << this->datum_byte_size;
   }
   else {
     int r_rsize_len = rsize_len * send_batch_num;
@@ -251,7 +254,8 @@ void lmdbio::db::read_batch() {
   has_diff_data_size = false;
   total_byte_size = 0;
   rsize_vec.clear();
-  //LOG(INFO) << "Rank " << rank << " Read batch";
+  cout << "Rank " << rank << " Read batch" << endl;
+  cout << "Rank " << rank << " Fetch size " << this->fetch_size << endl;
   for (int i = 0; i < this->fetch_size; i++) {
     // get pointers
     this->batch_ptrs[i] = (char*) lmdb_value_data();
@@ -276,7 +280,7 @@ void lmdbio::db::read_batch() {
       count++;
     }
     psize = size;
-    //LOG(INFO) << "Rank " << rank << " read item " << i << " size " << size;
+    cout << "Rank " << rank << " read item " << i << " size " << size << endl;
     //this->cursor->Next();
     lmdb_next();
     //validate_cursor();
@@ -284,7 +288,7 @@ void lmdbio::db::read_batch() {
   this->datum_byte_size = lmdb_value_size();
   max_diff_count = std::max(max_diff_count, diff_count);
   this->rsize_len = max_diff_count;
-  //LOG(INFO) << "Rank " << rank << " max_diff_count " << max_diff_count; 
+  //cout << "Rank " << rank << " max_diff_count " << max_diff_count; 
   // move a cursor to the next batch
   if (readers != 1) {
     //this->cursor->NextBatch(readers, this->fetch_size);
@@ -301,7 +305,7 @@ void lmdbio::db::check_diff_batch() {
   MPI_Allreduce(sop, rop, 2, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
   has_diff_data_size = rop[0] == 1;
   rsize_len = rop[1] + 4;
-  //LOG(INFO) << "Rank " << rank << " rsize_len " << rsize_len;
+  cout << "Rank " << rank << " check diff batch rsize_len " << rsize_len << endl;
 }
 
 void lmdbio::db::serialize_data(char** batch_bytes, int** s_rsize) {
@@ -318,12 +322,12 @@ void lmdbio::db::serialize_data(char** batch_bytes, int** s_rsize) {
   int s_rsize_len = (np / readers) * rsize_len * send_batch_num;
   int rsize_size = rsize_vec.size();
   int* s_rsize_;
-  /*LOG(INFO) << "Rank " << rank << " Serialze data";
-  LOG(INFO) << "Rank " << rank << " has diff data size " << has_diff_data_size;
-  LOG(INFO) << "Rank " << rank << " send_batch_num " << send_batch_num;
-  LOG(INFO) << "Rank " << rank << " s_rsize_len " << s_rsize_len;
-  LOG(INFO) << "Rank " << rank << " rsize_len " << rsize_len;
-  LOG(INFO) << "Rank " << rank << " sbatch_size " << sbatch_size;*/
+  cout << "Rank " << rank << " Serialze data" << endl;
+  cout << "Rank " << rank << " has diff data size " << has_diff_data_size << endl;
+  cout << "Rank " << rank << " send_batch_num " << send_batch_num << endl;
+  cout << "Rank " << rank << " s_rsize_len " << s_rsize_len << endl;
+  cout << "Rank " << rank << " rsize_len " << rsize_len << endl;
+  cout << "Rank " << rank << " sbatch_size " << sbatch_size << endl;
 
   *batch_bytes = (char*) malloc (sizeof(char) * total_byte_size);
   if (has_diff_data_size)
@@ -333,7 +337,7 @@ void lmdbio::db::serialize_data(char** batch_bytes, int** s_rsize) {
       size += rsize_vec[r_idx + 1];
       r_idx += 2;
     }
-    //LOG(INFO) << "Rank " << rank << " serialize item " << i << " size " << size;
+    cout << "Rank " << rank << " serialize item " << i << " size " << size << endl;
     if (has_diff_data_size) {
       rsize = size - psize;
       if (i / sbatch_size > count) {
@@ -356,12 +360,12 @@ void lmdbio::db::serialize_data(char** batch_bytes, int** s_rsize) {
       psize = size;
       tsize += size;
     }
-    //LOG(INFO) << "Rank " << rank << " serialize item " << i << " s_r_idx " << s_r_idx;
+    //cout << "Rank " << rank << " serialize item " << i << " s_r_idx " << s_r_idx;
     memcpy(*batch_bytes + offset, this->batch_ptrs[i], size);
     offset += size;
     // compute displacements and counts
   }
-  //LOG(INFO) << "Final s_r_idx " << s_r_idx;
+  //cout << "Final s_r_idx " << s_r_idx;
   if (has_diff_data_size) {
     s_rsize_[s_r_idx] = -1;
     s_rsize_[s_rsize_len - 1] = tsize;
@@ -369,7 +373,7 @@ void lmdbio::db::serialize_data(char** batch_bytes, int** s_rsize) {
   }
 
   /*for (int i = 0; i < s_rsize_len; i++) {
-    LOG(INFO) << "S_RSIZE item " << i << " " << s_rsize_[i]; 
+    cout << "S_RSIZE item " << i << " " << s_rsize_[i]; 
   }*/
 }
 
@@ -427,7 +431,7 @@ void lmdbio::db::dist_alltoallv(char* sbuf, char* rbuf,
   int senddispl = 0;
   int recvdispl = 0;
   int sendcount = sbatch_size * this->datum_byte_size; 
-  //LOG(INFO) << "Rank " << rank << " Datam byte size " << this->datum_byte_size;
+  //cout << "Rank " << rank << " Datam byte size " << this->datum_byte_size;
   int receiver_size = 0;
   int send_batch_num = readers > fetch_batch_num ? 1 
     : fetch_batch_num / readers;
@@ -547,7 +551,7 @@ void lmdbio::db::parse_sbatch_bytes(char* sbatch_bytes, int* r_rsize) {
   int send_batch_num = fetch_batch_num < readers ? 1 
     : fetch_batch_num / readers;
   int size = has_diff_data_size ? 0 : this->datum_byte_size;
-  //LOG(INFO) << "Rank " << rank << " parse_sbatch_bytes";
+  cout << "Rank " << rank << " parse_sbatch_bytes" << endl;
   if (has_comm) {
     //int count_size = sbatch_recvcount * current_batch;
     int count_size = 0;
@@ -563,61 +567,59 @@ void lmdbio::db::parse_sbatch_bytes(char* sbatch_bytes, int* r_rsize) {
       count_size = this->datum_byte_size * this->sbatch_size * current_batch;
     }
 
-    //create new record
-    num_records = this->sbatch_size;
-    records = (record *) operator new[] (num_records * sizeof(record));
 
-    if (has_comm) {
-      int count_size = 0;
-      int rsize_lim = rsize_len * (current_batch + 1);
-      if (has_diff_data_size) {
-        int idx = rsize_len - 1;
-        for (int i = 0; i < current_batch; i++) {
-          count_size += r_rsize[rsize_len - 1];
-          idx += rsize_len;
-        }
-      }
-      else {
-        count_size = this->datum_byte_size * this->sbatch_size * current_batch;
-      }
-      for (int i = 0; i < this->sbatch_size; i++) {
-        if (has_diff_data_size) {
-          if (!is_end && r_idx < rsize_lim
-              && r_rsize[r_idx] == i % sbatch_size) {
-            size += r_rsize[r_idx + 1];
-            r_idx += 2;
-            is_end = r_rsize[r_idx] == -1;
-            //printf("count %d \n", count);
-          }
-        }
-        new (&records[i]) record();
-        records[i].set_record(sbatch_bytes + count_size, size);
-        count_size += size;
+  }
+  num_records = this->sbatch_size;
+  records = (record *) operator new[] (num_records * sizeof(record));
+
+  if (has_comm) {
+    int count_size = 0;
+    int rsize_lim = rsize_len * (current_batch + 1);
+    if (has_diff_data_size) {
+      int idx = rsize_len - 1;
+      for (int i = 0; i < current_batch; i++) {
+        count_size += r_rsize[rsize_len - 1];
+        idx += rsize_len;
       }
     }
     else {
-      is_end = false;
-      rsize_len = rsize_vec.size();
-      for (int i = 0; i < this->sbatch_size; i++) {
-        if (has_diff_data_size) {
-          if (!is_end && r_idx < rsize_len
-              && rsize_vec[r_idx] == i % sbatch_size) {
-            size += rsize_vec[r_idx + 1];
-            r_idx += 2;
-            is_end = rsize_vec[r_idx] == -1;
-            //printf("count %d \n", count);
-          }
+      count_size = this->datum_byte_size * this->sbatch_size * current_batch;
+    }
+    for (int i = 0; i < this->sbatch_size; i++) {
+      if (has_diff_data_size) {
+        if (!is_end && r_idx < rsize_lim
+            && r_rsize[r_idx] == i % sbatch_size) {
+          size += r_rsize[r_idx + 1];
+          r_idx += 2;
+          is_end = r_rsize[r_idx] == -1;
+          //printf("count %d \n", count);
         }
-        new (&records[i]) record();
-        records[i].set_record(batch_ptrs[i], size);
       }
+      records[i].set_record(sbatch_bytes + count_size, size);
+      count_size += size;
+    }
+  }
+  else {
+    is_end = false;
+    rsize_len = rsize_vec.size();
+    for (int i = 0; i < this->sbatch_size; i++) {
+      if (has_diff_data_size) {
+        if (!is_end && r_idx < rsize_len
+            && rsize_vec[r_idx] == i % sbatch_size) {
+          size += rsize_vec[r_idx + 1];
+          r_idx += 2;
+          is_end = rsize_vec[r_idx] == -1;
+          cout << "count " << count << endl;
+        }
+      }
+      records[i].set_record(batch_ptrs[i], size);
     }
   }
 }
 
-  int lmdbio::db::read_record_batch(void) 
-  {
-  //LOG(INFO) << "Parallel data reader max iter " << max_iter;
+int lmdbio::db::read_record_batch(void) 
+{
+  cout << "Parallel data reader max iter " << max_iter << endl;
   char* sbatch_bytes;
   char* batch_bytes;
   int* s_rsize;
@@ -626,13 +628,14 @@ void lmdbio::db::parse_sbatch_bytes(char* sbatch_bytes, int* r_rsize) {
   this->rsize_len = 0;
   // each process reads one batch
   if (this->fetch_size != 0) {
-    //LOG(INFO) << "Current batch " << current_batch;
+    cout << "Current batch " << current_batch << endl;
     if (current_batch == -1 || ++current_batch >= this->fetch_batch_num) {
       // compute fetch size for the next data loading 
       current_batch = 0;
       if (is_reader(rank)) {
         read_batch();
       }
+      cout << "Rank " << rank << " has communication " << has_comm << endl;
       if (has_comm) {
         check_diff_batch();
         if (is_reader(rank)) {
@@ -650,13 +653,14 @@ void lmdbio::db::parse_sbatch_bytes(char* sbatch_bytes, int* r_rsize) {
       compute_fetch_size(true);
     }
     parse_sbatch_bytes(sbatch_bytes, r_rsize);
+    cout << "Rank " << rank << " successfully parse batch" << endl;
     if (has_comm) {
       delete sbatch_bytes;
       if (has_diff_data_size)
         delete r_rsize;
     }
   }
-
-  num_records = this->sbatch_size;
+  
+  cout << "Rank " << rank << " reaches the last line of read_record_batch" << endl;
   return 0;
 }

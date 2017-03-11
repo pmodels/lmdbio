@@ -48,7 +48,8 @@ private:
 class db
 {
 public:
-  db(MPI_Comm parent_comm, const char *filename, int batch_size, int phase, int max_iter) {
+  db(MPI_Comm parent_comm, const char *filename, int batch_size, 
+      int phase, int max_iter) {
     MPI_Comm_dup(parent_comm, &comm);
     fname = strdup(filename);
     this->batch_size = batch_size;
