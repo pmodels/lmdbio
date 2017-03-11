@@ -1,6 +1,6 @@
 AC_PREREQ(2.63)
 #
-# (C) 2006 by Argonne National Laboratory.
+# (C) 2017 by Argonne National Laboratory.
 #     See COPYRIGHT in top-level directory.
 #
 
