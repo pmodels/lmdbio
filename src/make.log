@@ -1,0 +1,2 @@
+/usr/lib/gcc/x86_64-redhat-linux/4.4.7/../../../../lib64/crt1.o: In function `_start':
+(.text+0x20): undefined reference to `main'
