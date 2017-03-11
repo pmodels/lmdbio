@@ -6,7 +6,7 @@
 
 #include "lmdbio.h"
 
-int read_record_batch(void ***records, int *num_records, int **record_sizes)
+int lmdbio::read_record_batch(void ***records, int *num_records, int **record_sizes)
 {
     return 0;
 }
