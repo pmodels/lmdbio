@@ -17,23 +17,27 @@ void lmdbio::db::init()
   current_batch = -1;
   has_diff_data_size = false;
   has_comm = true;
+  is_init = false;
   rsize_len = 0;
   dist_mode = "alltoallv";
+  np = 0; 
+  rank = 0;
 
   MPI_Comm_size(MPI_COMM_WORLD, &np);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+  //cout << "Total proc " << np << endl;
+  //cout << "This is rank " << rank << endl;
+
   this->batch_size = batch_size;
   this->sbatch_size = get_sbatch_size(rank);
   has_diff_batch_size = !is_identical_sbatch_size();
+  this->fetch_batch_num = 1;
   if (dist_mode == "no_mpi") {
     this->readers = np;
-    this->fetch_batch_num = 1;
   }
   else {
     compute_num_readers();
-    // fix number of prefetch batch to 1
-    this->fetch_batch_num = 1;
   }
   if (this->readers == np && this->fetch_batch_num == 1) {
     has_comm = false;
@@ -46,19 +50,23 @@ void lmdbio::db::init()
 
   this->total_images = this->max_iter * this->batch_size;
   compute_fetch_size(false);
-
-  // open database
-  if (is_reader(rank)) {
-    this->batch_ptrs = (char**) malloc(sizeof(char*) * this->fetch_size);
-    open_db();
-    this->datum_byte_size = lmdb_value_size();
-  }
+  init_readers();
   has_diff_batch_size = !is_identical_sbatch_size();
   if (dist_mode == "alltoallv") {
     sbatch_sendcounts = new int[np];
     sbatch_senddispls = new int[np];
     sbatch_recvcounts = new int[np];
     sbatch_recvdispls = new int[np];
+  }
+}
+
+void lmdbio::db::init_readers() {
+  // open database
+  if (is_reader(rank) && !is_init) {
+    this->batch_ptrs = (char**) malloc(sizeof(char*) * this->fetch_size);
+    open_db();
+    this->datum_byte_size = lmdb_value_size();
+    is_init = true;
   }
 }
 
@@ -88,7 +96,7 @@ void lmdbio::db::compute_fetch_size(bool invalid) {
   //adjust_readers(fetch_images, invalid);
   this->fetch_size = fetch_images / readers;
   this->fetch_batch_num = fetch_images / this->batch_size;
-  this->total_images -= fetch_images; 
+  //this->total_images -= fetch_images; 
   /*if (param_.phase() == caffe::TRAIN) {
     cout << "Rank " << rank << " New Readers: " << readers;
     cout << "Rank " << rank << " New Batch num: " << fetch_batch_num;
@@ -280,7 +288,7 @@ void lmdbio::db::read_batch() {
       count++;
     }
     psize = size;
-    cout << "Rank " << rank << " read item " << i << " size " << size << endl;
+    //cout << "Rank " << rank << " read item " << i << " size " << size << endl;
     //this->cursor->Next();
     lmdb_next();
     //validate_cursor();
@@ -619,7 +627,7 @@ void lmdbio::db::parse_sbatch_bytes(char* sbatch_bytes, int* r_rsize) {
 
 int lmdbio::db::read_record_batch(void) 
 {
-  cout << "Parallel data reader max iter " << max_iter << endl;
+  //cout << "Parallel data reader max iter " << max_iter << endl;
   char* sbatch_bytes;
   char* batch_bytes;
   int* s_rsize;
@@ -628,14 +636,13 @@ int lmdbio::db::read_record_batch(void)
   this->rsize_len = 0;
   // each process reads one batch
   if (this->fetch_size != 0) {
-    cout << "Current batch " << current_batch << endl;
+    //cout << "Current batch " << current_batch << endl;
     if (current_batch == -1 || ++current_batch >= this->fetch_batch_num) {
       // compute fetch size for the next data loading 
       current_batch = 0;
       if (is_reader(rank)) {
         read_batch();
       }
-      cout << "Rank " << rank << " has communication " << has_comm << endl;
       if (has_comm) {
         check_diff_batch();
         if (is_reader(rank)) {
@@ -650,10 +657,10 @@ int lmdbio::db::read_record_batch(void)
             delete s_rsize;
         }
       }
+      this->total_images -= this->fetch_size * readers;
       compute_fetch_size(true);
     }
     parse_sbatch_bytes(sbatch_bytes, r_rsize);
-    cout << "Rank " << rank << " successfully parse batch" << endl;
     if (has_comm) {
       delete sbatch_bytes;
       if (has_diff_data_size)
@@ -661,6 +668,18 @@ int lmdbio::db::read_record_batch(void)
     }
   }
   
-  cout << "Rank " << rank << " reaches the last line of read_record_batch" << endl;
   return 0;
+}
+
+void lmdbio::db::set_readers(int readers) {
+  if (readers <= np) {
+    if (readers == np && fetch_batch_num == 1) {
+      has_comm = false;
+    }
+    int tmp_readers = this->readers;
+    this->readers = readers;
+    compute_fetch_size(true);
+    init_readers();
+  }
+  std::cout << "Set readers to " << this->readers << std::endl;
 }

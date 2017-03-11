@@ -15,18 +15,23 @@ int main()
 
     lmdbio::db *db = new lmdbio::db(MPI_COMM_WORLD, filename, 
         BATCH_SIZE, TRAIN_PHASE, MAX_ITER);
+
+    db->set_readers(2);
+
     std::cout << "batch size: " << db->get_batch_size() << std::endl;
 
-    db->read_record_batch();
-    
-    std::cout << "num records: " << db->get_num_records() << std::endl;
+    for (int iter = 0; iter < MAX_ITER; iter++) {
+      db->read_record_batch();
 
-    for (int i = 0; i < db->get_num_records(); i++) {
+      std::cout << "num records: " << db->get_num_records() << std::endl;
 
-      lmdbio::record *record = db->get_record(i);
+      for (int i = 0; i < db->get_num_records(); i++) {
 
-      std::cout << "record size " << i << ": " 
-        << record->get_record_size() << std::endl;
+        lmdbio::record *record = db->get_record(i);
+
+        std::cout << "record size " << i << ": " 
+          << record->get_record_size() << std::endl;
+      }
     }
 
     delete db;

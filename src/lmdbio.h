@@ -68,13 +68,12 @@ public:
   }
 
   int read_record_batch(void ***records, int *num_records, int **record_sizes);
-
   int get_sbatch_size() const { return sbatch_size; }
-
   int get_batch_size(void) { return batch_size; }
   int read_record_batch(void);
   int get_num_records(void) { return get_sbatch_size(); }
   record *get_record(int i) { return &records[i]; }
+  void set_readers(int readers);
 
 private:
   MPI_Comm comm;
@@ -128,8 +127,10 @@ private:
   void dist_scatter(char* sbuf, char* rbuf);
   void adjust_readers(int fetch_images, bool invalid);
   void compute_fetch_size(bool invalid);
+  void init_readers(void);
   bool has_comm;
   string dist_mode;
+  bool is_init;
 
   // DB variables
   MDB_env* mdb_env_;
