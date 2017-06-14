@@ -48,95 +48,58 @@ private:
 class db
 {
 public:
-  db(MPI_Comm parent_comm, const char *filename, int batch_size, 
-      int phase, int max_iter) {
-    MPI_Comm_dup(parent_comm, &comm);
+  db(MPI_Comm parent_comm, const char *filename, int batch_size) {
+    MPI_Comm_dup(parent_comm, &global_comm);
     fname = strdup(filename);
     this->batch_size = batch_size;
-    this->phase = phase;  
-    this->max_iter = max_iter;
-    this->num_records = 0;
+    this->subbatch_size = 0;
     records = NULL;
     init();
-    compute_num_readers();
   }
 
   ~db(void) {
-    MPI_Comm_free(&comm);
+    if (is_reader()) {
+      mdb_cursor_close(mdb_cursor);
+      mdb_dbi_close(mdb_env_, mdb_dbi_);
+      mdb_env_close(mdb_env_);
+    }
+
+    MPI_Comm_free(&global_comm);
     // close database
-    mdb_cursor_close(mdb_cursor);
-    mdb_dbi_close(mdb_env_, mdb_dbi_);
-    mdb_env_close(mdb_env_);
     delete[] fname;
     delete records;
   }
 
   int read_record_batch(void ***records, int *num_records, int **record_sizes);
-  int get_sbatch_size() const { return sbatch_size; }
   int get_batch_size(void) { return batch_size; }
   int read_record_batch(void);
-  int get_num_records(void) { return get_sbatch_size(); }
+  int get_num_records(void) { return subbatch_size; }
   record *get_record(int i) { return &records[i]; }
-  void set_readers(int readers);
 
 private:
-  MPI_Comm comm;
+  MPI_Comm global_comm;
+  MPI_Comm local_comm;
+  MPI_Comm reader_comm;
+  int global_rank;
+  int global_np;
+  int local_rank;
+  int local_np;
+  int reader_id;
   const char *fname;
   record *records;
   char** batch_ptrs;
-  int num_records;
-  int phase;
-  void init();
-  void compute_num_readers();
-  int datum_byte_size;
-  int batch_size;
-  int sbatch_size;
-  MDB_cursor* cursor;
-  int rank;
-  int np;
-  int current_batch;
-  void open_db();
-  //void validate_cursor();
-  int get_sbatch_size(int sbatch_id);
-  void read_batch();
-  void parse_sbatch_bytes(char* sbatch_bytes, int* r_rsize);
-  bool is_identical_sbatch_size();
-  void send_batch(char* batch_bytes, char** sbatch_bytes, int* s_rsize, 
-      int** r_rsize);
-  void serialize_data(char** batch_bytes, int** s_rsize);
-  int max_iter;
-  int total_images;
-  int fetch_size;
-  int fetch_batch_num;
-  bool has_diff_data_size;
-  bool has_diff_batch_size;
-  bool is_full_batch;
+  int* send_sizes;
+  int* sizes;
   int total_byte_size;
-  vector<int> rsize_vec;
-  int rsize_len;
-  int* sbatch_sendcounts;
-  int* sbatch_senddispls;
-  int* sbatch_recvcounts;
-  int* sbatch_recvdispls;
+  int batch_size;
+  int subbatch_size;
   int readers;
-  void check_diff_batch();
-  bool is_reader(int proc);
-  int recv_group(int proc, int receiver_size);
-  int reader_id(int proc);
-  int read_group(int proc, int reader_per_batch);
-  void dist_alltoallv(char* sbuf, char* rbuf, int* sendcounts, int* senddispls,
-      int* recvcounts, int* recvdispls, int* s_rsize, int* r_rsize);
-  void rsize_alltoallv(int* s_rsize, int* r_rsize, int* sendcounts,
-      int* senddispls, int* recvcounts, int* recvdispls);
-  void dist_scatter(char* sbuf, char* rbuf);
-  void adjust_readers(int fetch_images, bool invalid);
-  void compute_fetch_size(bool invalid);
-  void init_readers(void);
-  bool has_comm;
-  string dist_mode;
-  bool is_init;
-
-  // DB variables
+  int fetch_size;
+  char* batch_bytes; 
+  int* send_displs;
+  int* send_counts;
+  char* subbatch_bytes;
+  MDB_cursor* cursor;
   MDB_env* mdb_env_;
   MDB_txn* mdb_txn;
   MDB_cursor* mdb_cursor;
@@ -144,6 +107,15 @@ private:
   MDB_val mdb_key_, mdb_value_;
   int valid_;
 
+  void init();
+  void assign_readers();
+  void open_db();
+  void send_batch();
+  void read_batch();
+  void check_diff_batch();
+  bool is_reader(int local_rank);
+  bool is_reader();
+  
   void check_lmdb(int success, const char* msg, bool verbose = true) {
     if (success == 0) {
       if (verbose)
@@ -195,8 +167,9 @@ private:
 
   void lmdb_init_cursor() {
     lmdb_seek_to_first();
-    if (rank != 0)
-      lmdb_seek_multiple(reader_id(rank) * fetch_size);
+    std::cout << "READER ID: " << reader_id << " rank " << global_rank << std::endl; 
+    if (reader_id != 0)
+      lmdb_seek_multiple(reader_id * fetch_size);
   }
 
   size_t lmdb_value_size() {
@@ -205,6 +178,10 @@ private:
 
   void* lmdb_value_data() {
     return mdb_value_.mv_data;
+  }
+
+  string key() {
+    return string(static_cast<const char*>(mdb_key_.mv_data), mdb_key_.mv_size);
   }
 };
 
