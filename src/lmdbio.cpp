@@ -123,7 +123,7 @@ void lmdbio::db::read_batch() {
   struct rusage rstart, rend;
   double ttime, utime, stime, sltime, start, end;
 
-  MPI_Barrier(MPI_COMM_WORLD);
+  MPI_Barrier(reader_comm);
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
 #endif
@@ -155,7 +155,7 @@ void lmdbio::db::read_batch() {
       get_inv_ctx_switches(rstart, rend),
       ttime, utime, stime, sltime);
 
-  MPI_Barrier(MPI_COMM_WORLD);
+  MPI_Barrier(reader_comm);
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
 #endif

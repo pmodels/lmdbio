@@ -1,8 +1,8 @@
 #include <iostream>
 #include "lmdbio.h"
 
-#define BATCH_SIZE (1)
-#define MAX_ITER (1)
+#define BATCH_SIZE (4096)
+#define MAX_ITER (2)
 
 int main()
 {
@@ -19,10 +19,10 @@ int main()
     int total_read_size = 0;
     int size = 0;
     for (int iter = 0; iter < MAX_ITER; iter++) {
-      std::cout << "read record batch " << std::endl;
+      std::cout << "rank " << rank << " read record batch" << std::endl;
       db->read_record_batch();
 
-      std::cout << "num records: " << db->get_num_records() << std::endl;
+      std::cout << "rank " << rank << " num records " << iter << ": " << db->get_num_records() << std::endl;
 
       for (int i = 0; i < db->get_num_records(); i++) {
 
@@ -37,7 +37,7 @@ int main()
       }
     }
 
-    std::cout << "total read size: " << total_read_size << std::endl;
+    std::cout << "rank " << rank << " total read size: " << total_read_size << std::endl;
 
     delete db;
     MPI_Barrier(MPI_COMM_WORLD);
