@@ -24,11 +24,9 @@ using std::string;
 #define TRAIN_PHASE (1)
 
 namespace lmdbio {
-
 class record {
 public:
-  record()
-  {
+  record() {
     data = NULL;
     record_size = 0;
   }
@@ -49,85 +47,100 @@ public:
   int record_size;
 };
 
+#ifdef BENCHMARK
+class io_stat {
+public:
+  io_stat() {
+    ctx_switches = 0.0;
+    inv_ctx_switches = 0.0;
+    ttime = 0.0;
+    utime = 0.0;
+    stime = 0.0;
+    sltime = 0.0;
+  }
+
+  void add_stat(double ctx_switches, double inv_ctx_switches,
+      double ttime, double utime, double stime, double sltime) {
+    this->ctx_switches += ctx_switches;
+    this->inv_ctx_switches += inv_ctx_switches;
+    this->ttime += ttime;
+    this->utime += utime;
+    this->stime += stime;
+    this->sltime += sltime;
+  }
+
+  void set_stat(double ctx_switches, double inv_ctx_switches,
+      double ttime, double utime, double stime, double sltime) {
+    this->ctx_switches = ctx_switches;
+    this->inv_ctx_switches = inv_ctx_switches;
+    this->ttime = ttime;
+    this->utime = utime;
+    this->stime = stime;
+    this->sltime = sltime;
+  }
+
+  double get_ctx_switches() { return ctx_switches; }
+  double get_inv_ctx_switches() { return inv_ctx_switches; }
+  double get_ttime() { return ttime; }
+  double get_utime() { return utime; }
+  double get_stime() { return stime; }
+  double get_sltime() { return sltime; }
+
+private:
+  double ctx_switches;
+  double inv_ctx_switches;
+  double ttime;
+  double utime;
+  double stime;
+  double sltime;
+};
+#endif
+
 class db
 {
 public:
-  db(MPI_Comm parent_comm, const char *filename, int batch_size) {
-    MPI_Comm_dup(parent_comm, &global_comm);
-    fname = strdup(filename);
-    this->batch_size = batch_size;
-    this->subbatch_size = 0;
-    records = NULL;
-#ifdef BENCHMARK
-    read_batch_time = 0.0;
-    serialize_batch_time = 0.0;
-    mpi_time = 0.0;
-    set_record_time = 0.0;
-    next_batch_time = 0.0;
-    read_ctx_switches = 0.0;
-    read_inv_ctx_switches = 0.0;
-    read_utime = 0.0;
-    read_stime = 0.0;
-    read_sltime = 0.0;
-    parse_ctx_switches = 0.0;
-    parse_inv_ctx_switches = 0.0;
-    parse_utime = 0.0;
-    parse_stime = 0.0;
-    parse_sltime = 0.0;
-#endif
-    init();
-  }
+  db() { }
 
-  ~db(void) {
+  void init(MPI_Comm parent_comm, const char *fname, int batch_size);
+
+  ~db() {
     if (is_reader()) {
       mdb_cursor_close(mdb_cursor);
       mdb_dbi_close(mdb_env_, mdb_dbi_);
       mdb_env_close(mdb_env_);
     }
-
-    MPI_Comm_free(&global_comm);
-    // close database
-    delete[] fname;
-    delete records;
+    
+    MPI_Win_free(&batch_win);
+    MPI_Win_free(&size_win);
+    delete[] records;
+    //MPI_Comm_free(&global_comm);
   }
 
   int read_record_batch(void ***records, int *num_records, int **record_sizes);
-  int get_batch_size(void) { return batch_size; }
+  int get_batch_size(void);
   int read_record_batch(void);
-  int get_num_records(void) { return subbatch_size; }
-  record *get_record(int i) { 
-    return &records[i]; 
-  }
+  int get_num_records(void);
+  record* get_record(int i);
 
 #ifdef BENCHMARK
-  float read_batch_time;
-  float serialize_batch_time;
-  float mpi_time;
-  float set_record_time;
-  float next_batch_time;
-  float read_ctx_switches;
-  float read_inv_ctx_switches;
-  float read_utime;
-  float read_stime;
-  float read_sltime;
-  float parse_ctx_switches;
-  float parse_inv_ctx_switches;
-  float parse_utime;
-  float parse_stime;
-  float parse_sltime;
+  double get_mpi_time();
+  double get_set_record_time();
+  io_stat get_read_stat();
+  io_stat get_parse_stat();
 #endif
 
 private:
   MPI_Comm global_comm;
   MPI_Comm local_comm;
   MPI_Comm reader_comm;
+  MPI_Win batch_win;
+  MPI_Win size_win;
+  record *records;
   int global_rank;
   int global_np;
   int local_rank;
   int local_np;
   int reader_id;
-  const char *fname;
-  record *records;
   char** batch_ptrs;
   int* send_sizes;
   int* sizes;
@@ -140,6 +153,9 @@ private:
   int* send_displs;
   int* send_counts;
   char* subbatch_bytes;
+  int win_size;
+  int win_displ;
+  bool is_large_dataset;
   MDB_cursor* cursor;
   MDB_env* mdb_env_;
   MDB_txn* mdb_txn;
@@ -148,44 +164,27 @@ private:
   MDB_val mdb_key_, mdb_value_;
   int valid_;
 
-  void init();
-  void assign_readers();
-  void open_db();
+  void assign_readers(const char* fname, int batch_size);
+  void open_db(const char* fname);
   void send_batch();
   void read_batch();
   void check_diff_batch();
   bool is_reader(int local_rank);
   bool is_reader();
+  void set_records();
 
 #ifdef BENCHMARK
-  /* calculate users time */
-  float get_utime(rusage rstart, rusage rend) {
-    return 1e6 * (rend.ru_utime.tv_sec - rstart.ru_utime.tv_sec) +
-      rend.ru_utime.tv_usec - rstart.ru_utime.tv_usec;       
-  }
+  double mpi_time;
+  double set_record_time;
+  io_stat read_stat;
+  io_stat parse_stat;
 
-  /* calculate kernel time */
-  float get_stime(rusage rstart, rusage rend) {
-    return 1e6 * (rend.ru_stime.tv_sec - rstart.ru_stime.tv_sec) +
-      rend.ru_stime.tv_usec - rstart.ru_stime.tv_usec;
-  }
-
-  /* calculate sleep time */
-  float get_sltime(float ttime, float utime, float stime) {
-    return ttime - utime - stime;
-  }
-
-  float get_ctx_switches(rusage rstart, rusage rend) {
-    return rend.ru_nvcsw - rstart.ru_nvcsw;
-  }
-
-  float get_inv_ctx_switches(rusage rstart, rusage rend) {
-    return rend.ru_nivcsw - rstart.ru_nivcsw;
-  }
-
-  float get_elapsed_time(float start, float end) {
-    return 1e6 * (end - start);
-  }
+  double get_utime(rusage rstart, rusage rend);
+  double get_stime(rusage rstart, rusage rend);
+  double get_sltime(double ttime, double utime, double stime);
+  double get_ctx_switches(rusage rstart, rusage rend);
+  double get_inv_ctx_switches(rusage rstart, rusage rend);
+  double get_elapsed_time(double start, double end);
 #endif
   
   void check_lmdb(int success, const char* msg, bool verbose = true) {
@@ -239,7 +238,6 @@ private:
 
   void lmdb_init_cursor() {
     lmdb_seek_to_first();
-    std::cout << "READER ID: " << reader_id << " rank " << global_rank << std::endl; 
     if (reader_id != 0)
       lmdb_seek_multiple(reader_id * fetch_size);
   }
