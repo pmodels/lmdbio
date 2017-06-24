@@ -22,6 +22,8 @@ using std::string;
 
 #define TEST_PHASE (0)
 #define TRAIN_PHASE (1)
+#define MODE_SCATTERV (0)
+#define MODE_SHMEM (1)
 
 namespace lmdbio {
 class record {
@@ -99,20 +101,25 @@ private:
 class db
 {
 public:
-  db() { }
+  db() {
+    mode = MODE_SHMEM;
+  }
 
   void init(MPI_Comm parent_comm, const char *fname, int batch_size);
+  void set_mode(int mode);
 
   ~db() {
-    if (is_reader()) {
+    /*if (is_reader()) {
       mdb_cursor_close(mdb_cursor);
       mdb_dbi_close(mdb_env_, mdb_dbi_);
       mdb_env_close(mdb_env_);
     }
-    
-    MPI_Win_free(&batch_win);
-    MPI_Win_free(&size_win);
-    delete[] records;
+   
+    if (mode == MODE_SHMEM) {
+      MPI_Win_free(&batch_win);
+      MPI_Win_free(&size_win);
+    }
+    delete[] records;*/
     //MPI_Comm_free(&global_comm);
   }
 
@@ -125,6 +132,14 @@ public:
 #ifdef BENCHMARK
   double get_mpi_time();
   double get_set_record_time();
+  double get_init_var_time();
+  double get_init_db_time();
+  double get_init_db_1_time();
+  double get_init_db_barrier_1_time();
+  double get_open_db_time();
+  double get_init_db_barrier_2_time();
+  double get_init_db_2_time();
+
   io_stat get_read_stat();
   io_stat get_parse_stat();
 #endif
@@ -149,9 +164,9 @@ private:
   int subbatch_size;
   int readers;
   int fetch_size;
-  char* batch_bytes; 
   int* send_displs;
   int* send_counts;
+  char* batch_bytes; 
   char* subbatch_bytes;
   int win_size;
   int win_displ;
@@ -163,6 +178,7 @@ private:
   MDB_dbi mdb_dbi_;
   MDB_val mdb_key_, mdb_value_;
   int valid_;
+  int mode;
 
   void assign_readers(const char* fname, int batch_size);
   void open_db(const char* fname);
@@ -176,6 +192,13 @@ private:
 #ifdef BENCHMARK
   double mpi_time;
   double set_record_time;
+  double init_var_time;
+  double init_db_time;
+  double init_db_1_time;
+  double init_db_barrier_1_time;
+  double open_db_time;
+  double init_db_barrier_2_time;
+  double init_db_2_time;
   io_stat read_stat;
   io_stat parse_stat;
 
