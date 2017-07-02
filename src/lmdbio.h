@@ -24,6 +24,8 @@ using std::string;
 #define TRAIN_PHASE (1)
 #define MODE_SCATTERV (0)
 #define MODE_SHMEM (1)
+#define MODE_STRIDE (0)
+#define MODE_CONT (1)
 
 namespace lmdbio {
 class record {
@@ -102,11 +104,12 @@ class db
 {
 public:
   db() {
-    mode = MODE_SHMEM;
+    dist_mode = MODE_SHMEM;
+    read_mode = MODE_STRIDE;
   }
 
   void init(MPI_Comm parent_comm, const char *fname, int batch_size);
-  void set_mode(int mode);
+  void set_mode(int dist_mode, int read_mode);
 
   ~db() {
     /*if (is_reader()) {
@@ -178,7 +181,8 @@ private:
   MDB_dbi mdb_dbi_;
   MDB_val mdb_key_, mdb_value_;
   int valid_;
-  int mode;
+  int dist_mode;
+  int read_mode;
 
   void assign_readers(const char* fname, int batch_size);
   void open_db(const char* fname);
@@ -234,6 +238,9 @@ private:
     }
   }
 
+  void lmdb_print_stat() {
+  }
+
   void lmdb_seek_to_first() {
       lmdb_seek(MDB_FIRST);
   }
@@ -259,18 +266,31 @@ private:
     lmdb_seek_multiple((readers - 1) * fetch_size);
   }
 
-  void lmdb_init_cursor() {
-    lmdb_seek_to_first();
-    if (reader_id != 0)
-      lmdb_seek_multiple(reader_id * fetch_size);
-  }
-
   size_t lmdb_value_size() {
     return mdb_value_.mv_size;
   }
 
   void* lmdb_value_data() {
     return mdb_value_.mv_data;
+  }
+
+  void lmdb_init_cursor() {
+    int offset = 0;
+    lmdb_seek_to_first();
+    std::cout << "Read mode " << read_mode << " MODE_STRIDE " << 
+      MODE_STRIDE << " MODE_CONT " << MODE_CONT <<  std::endl;
+    if (reader_id != 0)
+      if (read_mode == MODE_STRIDE) {
+        offset = fetch_size;
+      }
+      else if (read_mode == MODE_CONT) {
+        MDB_stat stat;
+        mdb_env_stat(mdb_env_, &stat);
+        std::cout << "Number of records " << stat.ms_entries << std::endl;
+        offset = stat.ms_entries / readers;
+      }
+    std::cout << "Reader " << reader_id << " offset " << offset << std::endl;
+    lmdb_seek_multiple(reader_id * offset);
   }
 
   string key() {

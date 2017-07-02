@@ -102,6 +102,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 #endif
     cout << "OPEN DB" << endl;
     open_db(fname);
+    lmdb_print_stat();
 
 #ifdef BENCHMARK
     end_db = MPI_Wtime();
@@ -117,13 +118,14 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   /* broadcast a size of data to allocate the shared buffer */
   cout << "BCAST" << endl;
   MPI_Bcast(&size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+  cout << "BCAST SIZE " << size;
   this->win_size = subbatch_size * size * 2;
 
   /* allocate neccessary buffer */
   cout << "FETCH SIZE " << fetch_size << endl;
   if (is_reader(local_rank))
     batch_ptrs = new char*[fetch_size];
-  if (mode == MODE_SCATTERV) {
+  if (dist_mode == MODE_SCATTERV) {
     if (is_reader(local_rank)) {
       send_sizes = new int[fetch_size];
       send_displs = new int[local_np];
@@ -133,7 +135,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
     sizes = new int[subbatch_size];
     subbatch_bytes = (char*) malloc(win_size);
   }
-  else if (mode == MODE_SHMEM) {
+  else if (dist_mode == MODE_SHMEM) {
     MPI_Win_allocate_shared(subbatch_size * sizeof(int), sizeof(int),
         MPI_INFO_NULL, local_comm, &sizes, &size_win);
     MPI_Win_allocate_shared(win_size, sizeof(char), MPI_INFO_NULL, local_comm,
@@ -179,7 +181,7 @@ void lmdbio::db::read_batch() {
   /* compute size of send buffer and get pointers */
   count = 0;
   total_byte_size = 0;
-  if (mode == MODE_SCATTERV) {
+  if (dist_mode == MODE_SCATTERV) {
     read_sizes = this->send_sizes;
     for (int i = 0; i < fetch_size; i++) {
       if (i % subbatch_size == 0) {
@@ -200,7 +202,7 @@ void lmdbio::db::read_batch() {
     total_byte_size += count;
     send_counts[id - 1] = count;
   }
-  else if (mode == MODE_SHMEM) {
+  else if (dist_mode == MODE_SHMEM) {
     read_sizes = this->sizes;
     for (int i = 0; i < fetch_size; i++) {
       size = lmdb_value_size();
@@ -215,7 +217,7 @@ void lmdbio::db::read_batch() {
   assert(total_byte_size <= win_size * global_np);
 
   /* move a cursor to the next location */
-  if (global_np != 1)
+  if (read_mode == MODE_STRIDE && global_np != 1)
     lmdb_next_fetch();
 
 #ifdef BENCHMARK
@@ -235,14 +237,14 @@ void lmdbio::db::read_batch() {
 #endif
 
   count = 0;
-  if (mode == MODE_SCATTERV) {
+  if (dist_mode == MODE_SCATTERV) {
     for (int i = 0; i < fetch_size; i++) {
       size = read_sizes[i];
       memcpy(batch_bytes + count, batch_ptrs[i], size);
       count += size;
     }
   }
-  else if (mode == MODE_SHMEM) {
+  else if (dist_mode == MODE_SHMEM) {
     for (int i = 0; i < fetch_size; i++) {
       size = read_sizes[i];
       if (i % subbatch_size == 0)
@@ -301,7 +303,7 @@ void lmdbio::db::set_records() {
 #ifdef BENCHMARK
   double start;
 #endif
-  if (mode == MODE_SHMEM)
+  if (dist_mode == MODE_SHMEM)
     MPI_Barrier(local_comm);
 #ifdef BENCHMARK
   start = MPI_Wtime();
@@ -317,12 +319,18 @@ void lmdbio::db::set_records() {
 #endif
 }
 
-void lmdbio::db::set_mode(int mode) {
-  if (mode == MODE_SCATTERV)
-    cout << "Set mode to SCATTERV" << endl;
-  else if (mode == MODE_SHMEM)
-    cout << "Set mode to SHMEM" << endl;
-  this->mode = mode;
+void lmdbio::db::set_mode(int dist_mode, int read_mode) {
+  if (dist_mode == MODE_SCATTERV)
+    cout << "Set dist mode to SCATTERV" << endl;
+  else if (dist_mode == MODE_SHMEM)
+    cout << "Set dist mode to SHMEM" << endl;
+  if (read_mode == MODE_STRIDE)
+    cout << "Set read mode to STRIDE" << endl;
+  else if (read_mode == MODE_CONT)
+    cout << "Set read mode to CONT" << endl;
+
+  this->dist_mode = dist_mode;
+  this->read_mode = read_mode;
 }
 
 /* a process with local rank = 0 is a reader  */
@@ -338,7 +346,7 @@ int lmdbio::db::read_record_batch(void)
 {
   if (is_reader())
     read_batch();
-  if (mode == MODE_SCATTERV)
+  if (dist_mode == MODE_SCATTERV)
     send_batch();
   set_records();
   return 0;
@@ -355,6 +363,7 @@ int lmdbio::db::get_num_records() {
 lmdbio::record* lmdbio::db::get_record(int i) {
   return &records[i];
 }
+
 
 #ifdef BENCHMARK
 /* calculate users time */
@@ -429,4 +438,6 @@ lmdbio::io_stat lmdbio::db::get_read_stat() {
 lmdbio::io_stat lmdbio::db::get_parse_stat() {
   return parse_stat;
 }
+
+
 #endif
