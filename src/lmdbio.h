@@ -189,7 +189,6 @@ private:
   char* lmdb_buffer;
   int start_pg;
   int end_pg;
-  void* cursor_buffer;
 
   void assign_readers(const char* fname, int batch_size);
   void open_db(const char* fname);
@@ -246,7 +245,9 @@ private:
     }
   }
 
-  void lmdb_print_stat() {
+  void lmdb_get_current() {
+    mdb_cursor_get(mdb_cursor, &mdb_key_, &mdb_value_,
+        MDB_GET_CURRENT);
   }
 
   void lmdb_seek_to_first() {
@@ -259,7 +260,7 @@ private:
 
   void lmdb_seek_multiple(int skip_size) {
     int mdb_status = 0;
-    for (int i = 0; i < skip_size - 1; i++) {
+    for (int i = 0; i < skip_size; i++) {
       mdb_status = mdb_cursor_get(mdb_cursor, NULL, NULL, MDB_NEXT);
       if (mdb_status == MDB_NOTFOUND) {
         lmdb_seek_to_first();
@@ -267,7 +268,7 @@ private:
         check_lmdb(mdb_status, "Seek multiple", false);
       }
     }
-    lmdb_seek(MDB_NEXT);
+    //lmdb_seek(MDB_NEXT);
   }
 
   void lmdb_next_fetch() {
@@ -299,6 +300,11 @@ private:
       }
     std::cout << "Reader " << reader_id << " offset " << offset << std::endl;*/
     //lmdb_seek_multiple(reader_id * offset);
+
+#ifndef ICPADS
+    /* shift the cursor */
+    lmdb_seek_multiple(reader_id * fetch_size);
+#endif
   }
 
   string key() {

@@ -103,7 +103,6 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 #endif
     //cout << "OPEN DB" << endl;
     open_db(fname);
-    lmdb_print_stat();
 
 #ifdef BENCHMARK
     end_db = MPI_Wtime();
@@ -155,21 +154,31 @@ void lmdbio::db::open_db(const char* fname) {
   int max_try = 200;
   int rc = 0;
   int success = 0;
-  srand(time(NULL));
+
+  //srand(time(NULL));
   check_lmdb(mdb_env_create(&mdb_env_), "Created environment", false);
   check_lmdb(mdb_env_set_maxreaders(mdb_env_, readers), "Set maxreaders",
       false);
+
+#ifdef ICPADS
+  size_t foos[] = { 7980184936448, 8639120420864, 2858116001792 };
+
   /* random an address and fix mmap's address */
-  for (int i = 0; i < max_try; i++) {
+  for (int i = 0; i < 3; i++) {
     if (global_rank == 0) {
-      addr = (size_t) PAGE_SIZE * rand();
+      //addr = (size_t) PAGE_SIZE * rand();
+      addr = foos[i];
+      //addr = (size_t) 7980184936448;
       snprintf(addr_str, 100, "MMAP_ADDRESS=%llu", addr);
       cout << addr_str << endl;
       putenv(addr_str);
+      cout << "mapping file " << fname << endl;
       rc = mdb_env_open(mdb_env_, fname, flags, 0664);
       cout << "reader " << reader_id << " error code " << rc << endl;
-      if (rc != 0)
+      if (rc != 0) {
+        cout << "mmap failed; trying again\n";
         continue;
+      }
     }
     MPI_Bcast(addr_str, 100, MPI_CHAR, 0, reader_comm);
     if (global_rank != 0) {
@@ -190,6 +199,11 @@ void lmdbio::db::open_db(const char* fname) {
   }
   /* set lmdb buffer */
   lmdb_buffer = (char*) addr;
+#else
+  rc = mdb_env_open(mdb_env_, fname, flags, 0664);
+  cout << "reader " << reader_id << " error code " << rc << endl;
+#endif
+
   check_lmdb(mdb_txn_begin(mdb_env_, NULL, MDB_RDONLY, &mdb_txn),
       "Begun transaction", false);
   check_lmdb(mdb_dbi_open(mdb_txn, NULL, 0, &mdb_dbi_),
@@ -217,6 +231,8 @@ void lmdbio::db::read_batch() {
   int id = 0;
   int count = 0;
   int cursor_buffer_size = 0;
+  void* start_cursor_buffer;
+  void* end_cursor_buffer;
 #ifdef BENCHMARK
   struct rusage rstart, rend;
   double ttime, utime, stime, sltime, start, end;
@@ -225,31 +241,49 @@ void lmdbio::db::read_batch() {
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
 #endif
-  //cout << "reader " << reader_id << " touching pages" << endl;
+
+#ifdef ICPADS
+  cout << "touching pages\n";
   lmdb_touch_pages();
+  cout << "done touching pages\n";
+
   if (reader_id != 0) {
-    //cout << "reader " << reader_id << " reading count" << endl;
+    //cout << "receiving cursor buf size\n";
     MPI_Recv(&cursor_buffer_size, 1, MPI_INT, reader_id - 1, 0, reader_comm, 
         MPI_STATUS_IGNORE);
-    //cout << "reader " << reader_id << " reading serialized buffer" << endl;
-    cursor_buffer = malloc(cursor_buffer_size);
-    MPI_Recv(cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id - 1, 0, 
+    //cout << "got cursor buffer size " << cursor_buffer_size << endl;
+    start_cursor_buffer = malloc(cursor_buffer_size);
+    //cout << "allocated cursor buffer " << start_cursor_buffer << endl;
+    MPI_Recv(start_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id - 1, 0, 
         reader_comm, MPI_STATUS_IGNORE);
-    //cout << "reader " << reader_id << " deserializing buffer" << endl;
-    mdb_deserialize_cursor(cursor_buffer, cursor_buffer_size, mdb_cursor);
+    //cout << "received data from the cursor buffer\n";
+    mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
+    //cout << "done deserializing\n";
+    //free(cursor_buffer);
+  }
+  else {
+    mdb_serialize_cursor(mdb_cursor, &start_cursor_buffer, &cursor_buffer_size);
   }
 
-  //cout << "reader " << reader_id << " seek for " << fetch_size << endl;
-  lmdb_seek_multiple(fetch_size + 1);
-
-  //cout << "reader " << reader_id << " finish seeking" << endl;
   if (reader_id != readers - 1) {
-    mdb_serialize_cursor(mdb_cursor, &cursor_buffer, &cursor_buffer_size);
+    /* shift the cursor */
+    lmdb_seek_multiple(fetch_size);
+
+    //cout << "serializing buffer\n";
+    mdb_serialize_cursor(mdb_cursor, &end_cursor_buffer, &cursor_buffer_size);
+    //cout << "serialized buffer into " << end_cursor_buffer << " size " << cursor_buffer_size << endl;
     MPI_Send(&cursor_buffer_size, 1, MPI_INT, reader_id + 1, 0, reader_comm);
-    MPI_Send(cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id + 1, 0, 
+    MPI_Send(end_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id + 1, 0, 
         reader_comm);
+    //cout << "sent end cursor buffer\n";
+    free(end_cursor_buffer);
+    /* restore the cursor */
+    //cout << "deserializing cursor buffer " << start_cursor_buffer << " size " << cursor_buffer_size << endl;
+    mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
+    //cout << "done deserializing cursor buffer " << start_cursor_buffer << " size " << cursor_buffer_size << endl;
+    free(start_cursor_buffer);
   }
-  //cout << "reader " << reader_id << " done sending the cursor" << endl;
+#endif
 
   /* compute size of send buffer and get pointers */
   count = 0;
@@ -277,7 +311,9 @@ void lmdbio::db::read_batch() {
   }
   else if (dist_mode == MODE_SHMEM) {
     read_sizes = this->sizes;
+    lmdb_get_current();
     for (int i = 0; i < fetch_size; i++) {
+      cout << "Reader " << reader_id << " reads item " << i << " key " << key() << endl;
       size = lmdb_value_size();
       batch_ptrs[i] = (char*) lmdb_value_data();
       read_sizes[i] = size;
@@ -289,9 +325,29 @@ void lmdbio::db::read_batch() {
   /* determine if the data is larger than a buffer */
   assert(total_byte_size <= win_size * global_np);
 
+#ifdef ICPADS
   /* move a cursor to the next location */
-  //if (read_mode == MODE_STRIDE && global_np != 1)
-    //lmdb_next_fetch();
+  if (read_mode == MODE_STRIDE) {
+    if (reader_id == readers - 1) {
+      mdb_serialize_cursor(mdb_cursor, &end_cursor_buffer, &cursor_buffer_size);
+      MPI_Send(&cursor_buffer_size, 1, MPI_INT, 0, 0, reader_comm);
+      MPI_Send(end_cursor_buffer, cursor_buffer_size, MPI_BYTE, 0, 0, reader_comm);
+      free(end_cursor_buffer);
+    }
+    else if (reader_id == 0) {
+      MPI_Recv(&cursor_buffer_size, 1, MPI_INT, readers - 1, 0, reader_comm, 
+          MPI_STATUS_IGNORE);
+      start_cursor_buffer = malloc(cursor_buffer_size);
+      MPI_Recv(start_cursor_buffer, cursor_buffer_size, MPI_BYTE, readers - 1, 0, 
+          reader_comm, MPI_STATUS_IGNORE);
+      mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
+    }
+  }
+#else
+  /* shift the cursor */
+  lmdb_seek_multiple(fetch_size * (readers - 1));
+#endif
+
 
 #ifdef BENCHMARK
   getrusage(RUSAGE_SELF, &rend);
