@@ -26,6 +26,7 @@ using std::string;
 #define MODE_SHMEM (1)
 #define MODE_STRIDE (0)
 #define MODE_CONT (1)
+#define PAGE_SIZE (4096)
 
 namespace lmdbio {
 class record {
@@ -173,6 +174,8 @@ private:
   char* subbatch_bytes;
   int win_size;
   int win_displ;
+  int sample_size;
+  int num_read_pages;
   bool is_large_dataset;
   MDB_cursor* cursor;
   MDB_env* mdb_env_;
@@ -183,6 +186,10 @@ private:
   int valid_;
   int dist_mode;
   int read_mode;
+  char* lmdb_buffer;
+  int start_pg;
+  int end_pg;
+  void* cursor_buffer;
 
   void assign_readers(const char* fname, int batch_size);
   void open_db(const char* fname);
@@ -192,6 +199,7 @@ private:
   bool is_reader(int local_rank);
   bool is_reader();
   void set_records();
+  void lmdb_touch_pages();
 
 #ifdef BENCHMARK
   double mpi_time;
@@ -277,7 +285,7 @@ private:
   void lmdb_init_cursor() {
     int offset = 0;
     lmdb_seek_to_first();
-    std::cout << "Read mode " << read_mode << " MODE_STRIDE " << 
+    /*std::cout << "Read mode " << read_mode << " MODE_STRIDE " << 
       MODE_STRIDE << " MODE_CONT " << MODE_CONT <<  std::endl;
     if (reader_id != 0)
       if (read_mode == MODE_STRIDE) {
@@ -289,8 +297,8 @@ private:
         std::cout << "Number of records " << stat.ms_entries << std::endl;
         offset = stat.ms_entries / readers;
       }
-    std::cout << "Reader " << reader_id << " offset " << offset << std::endl;
-    lmdb_seek_multiple(reader_id * offset);
+    std::cout << "Reader " << reader_id << " offset " << offset << std::endl;*/
+    //lmdb_seek_multiple(reader_id * offset);
   }
 
   string key() {
