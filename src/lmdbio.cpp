@@ -13,6 +13,7 @@
 
 using std::cout;
 using std::endl;
+static int tmp = 0;
 
 void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size)
 {
@@ -103,6 +104,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 #endif
     //cout << "OPEN DB" << endl;
     open_db(fname);
+    printf("tmp %d\n", tmp);
 
 #ifdef BENCHMARK
     end_db = MPI_Wtime();
@@ -122,7 +124,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   this->win_size = subbatch_size * size * 2;
 
   /* allocate neccessary buffer */
-  cout << "FETCH SIZE " << fetch_size << endl;
+  //cout << "FETCH SIZE " << fetch_size << endl;
   if (is_reader(local_rank))
     batch_ptrs = new char*[fetch_size];
   if (dist_mode == MODE_SCATTERV) {
@@ -155,26 +157,22 @@ void lmdbio::db::open_db(const char* fname) {
   int rc = 0;
   int success = 0;
 
-  //srand(time(NULL));
+  srand(time(NULL));
   check_lmdb(mdb_env_create(&mdb_env_), "Created environment", false);
   check_lmdb(mdb_env_set_maxreaders(mdb_env_, readers), "Set maxreaders",
       false);
 
 #ifdef ICPADS
-  size_t foos[] = { 7980184936448, 8639120420864, 2858116001792 };
-
   /* random an address and fix mmap's address */
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < max_try; i++) {
     if (global_rank == 0) {
-      //addr = (size_t) PAGE_SIZE * rand();
-      addr = foos[i];
-      //addr = (size_t) 7980184936448;
+      addr = (size_t) PAGE_SIZE * rand();
       snprintf(addr_str, 100, "MMAP_ADDRESS=%llu", addr);
       cout << addr_str << endl;
       putenv(addr_str);
-      cout << "mapping file " << fname << endl;
+      //cout << "mapping file " << fname << endl;
       rc = mdb_env_open(mdb_env_, fname, flags, 0664);
-      cout << "reader " << reader_id << " error code " << rc << endl;
+      //cout << "reader " << reader_id << " error code " << rc << endl;
       if (rc != 0) {
         cout << "mmap failed; trying again\n";
         continue;
@@ -184,11 +182,13 @@ void lmdbio::db::open_db(const char* fname) {
     if (global_rank != 0) {
       putenv(addr_str);
       rc = mdb_env_open(mdb_env_, fname, flags, 0664);
-      cout << "reader " << reader_id << " error code " << rc << endl;
+      //cout << "reader " << reader_id << " error code " << rc << endl;
     }
     MPI_Allreduce(&rc, &success, 1, MPI_INT, MPI_MAX, reader_comm);
-    if (success == 0)
+    if (success == 0) {
+      printf("all processes got the same address %llu\n", addr);
       break;
+    }
     if (rc == 0)
       mdb_env_close(mdb_env_);
     rc = success;
@@ -198,10 +198,11 @@ void lmdbio::db::open_db(const char* fname) {
     exit(1);
   }
   /* set lmdb buffer */
-  lmdb_buffer = (char*) addr;
+  strtok(addr_str, "=");
+  addr = atoll(strtok(NULL, "="));
 #else
   rc = mdb_env_open(mdb_env_, fname, flags, 0664);
-  cout << "reader " << reader_id << " error code " << rc << endl;
+  //cout << "reader " << reader_id << " error code " << rc << endl;
 #endif
 
   check_lmdb(mdb_txn_begin(mdb_env_, NULL, MDB_RDONLY, &mdb_txn),
@@ -212,16 +213,21 @@ void lmdbio::db::open_db(const char* fname) {
       "Opened cursor", false);
   lmdb_init_cursor();
   sample_size = lmdb_value_size();
+  /* round sample size to a page unit */
   sample_size = (sample_size & (~(PAGE_SIZE - 1))) 
     + (PAGE_SIZE * !!(sample_size % PAGE_SIZE));
-  //cout << "sample size " << sample_size << " fetch_size " << fetch_size << 
-  //  " page_size "  << PAGE_SIZE << endl;
   num_read_pages = (sample_size * fetch_size) / PAGE_SIZE;
-  start_pg = reader_id * num_read_pages;
-  end_pg = start_pg + num_read_pages;
-  //cout << "Reader " << reader_id << ": Touching from " << start_pg << " to " 
-  //  << end_pg << endl;
-  //lmdb_touch_pages();
+
+  lmdb_buffer = (char*) addr;
+  read_pages = num_read_pages;
+  printf("LMDB buffer address %p\n", lmdb_buffer);
+
+  /* skip the first few pages as they are the meta pages */
+  start_pg = (reader_id * num_read_pages);
+  if (reader_id == 0)
+      start_pg += 3;
+  printf("setting start page to %d\n", start_pg);
+  fflush(stdout);
 }
 
 /* a function for readers */
@@ -237,29 +243,22 @@ void lmdbio::db::read_batch() {
   struct rusage rstart, rend;
   double ttime, utime, stime, sltime, start, end;
 
-  //MPI_Barrier(reader_comm);
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
 #endif
 
 #ifdef ICPADS
-  cout << "touching pages\n";
+  //cout << "touching pages\n";
   lmdb_touch_pages();
-  cout << "done touching pages\n";
+  //cout << "done touching pages\n";
 
   if (reader_id != 0) {
-    //cout << "receiving cursor buf size\n";
     MPI_Recv(&cursor_buffer_size, 1, MPI_INT, reader_id - 1, 0, reader_comm, 
         MPI_STATUS_IGNORE);
-    //cout << "got cursor buffer size " << cursor_buffer_size << endl;
     start_cursor_buffer = malloc(cursor_buffer_size);
-    //cout << "allocated cursor buffer " << start_cursor_buffer << endl;
     MPI_Recv(start_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id - 1, 0, 
         reader_comm, MPI_STATUS_IGNORE);
-    //cout << "received data from the cursor buffer\n";
     mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
-    //cout << "done deserializing\n";
-    //free(cursor_buffer);
   }
   else {
     mdb_serialize_cursor(mdb_cursor, &start_cursor_buffer, &cursor_buffer_size);
@@ -269,18 +268,13 @@ void lmdbio::db::read_batch() {
     /* shift the cursor */
     lmdb_seek_multiple(fetch_size);
 
-    //cout << "serializing buffer\n";
     mdb_serialize_cursor(mdb_cursor, &end_cursor_buffer, &cursor_buffer_size);
-    //cout << "serialized buffer into " << end_cursor_buffer << " size " << cursor_buffer_size << endl;
     MPI_Send(&cursor_buffer_size, 1, MPI_INT, reader_id + 1, 0, reader_comm);
     MPI_Send(end_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id + 1, 0, 
         reader_comm);
-    //cout << "sent end cursor buffer\n";
     free(end_cursor_buffer);
     /* restore the cursor */
-    //cout << "deserializing cursor buffer " << start_cursor_buffer << " size " << cursor_buffer_size << endl;
     mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
-    //cout << "done deserializing cursor buffer " << start_cursor_buffer << " size " << cursor_buffer_size << endl;
     free(start_cursor_buffer);
   }
 #endif
@@ -310,16 +304,23 @@ void lmdbio::db::read_batch() {
     send_counts[id - 1] = count;
   }
   else if (dist_mode == MODE_SHMEM) {
+      size_t start, end;
     read_sizes = this->sizes;
     lmdb_get_current();
     for (int i = 0; i < fetch_size; i++) {
-      cout << "Reader " << reader_id << " reads item " << i << " key " << key() << endl;
+      //cout << "Reader " << reader_id << " reads item " << i << " key " << key() << endl;
       size = lmdb_value_size();
       batch_ptrs[i] = (char*) lmdb_value_data();
       read_sizes[i] = size;
       total_byte_size += size;
       lmdb_next();
     }
+    printf("fetched data from page %lld to %lld\n",
+           (batch_ptrs[0] - lmdb_buffer) / getpagesize(),
+           (batch_ptrs[fetch_size - 1] - lmdb_buffer) / getpagesize());
+    read_pages = (batch_ptrs[fetch_size - 1] - batch_ptrs[0]) / getpagesize();
+    start = (size_t) (batch_ptrs[0] - lmdb_buffer) / getpagesize();
+    start_pg = start + (read_pages * readers);
   }
 
   /* determine if the data is larger than a buffer */
@@ -348,7 +349,6 @@ void lmdbio::db::read_batch() {
   lmdb_seek_multiple(fetch_size * (readers - 1));
 #endif
 
-
 #ifdef BENCHMARK
   getrusage(RUSAGE_SELF, &rend);
   end = MPI_Wtime();
@@ -360,7 +360,6 @@ void lmdbio::db::read_batch() {
       get_inv_ctx_switches(rstart, rend),
       ttime, utime, stime, sltime);
 
-  //MPI_Barrier(reader_comm);
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
 #endif
@@ -463,12 +462,12 @@ void lmdbio::db::set_mode(int dist_mode, int read_mode) {
 }
 
 void lmdbio::db::lmdb_touch_pages() {
-  int tmp = 0;
-  for (size_t i = start_pg;  i < end_pg; i++) {
-    tmp += lmdb_buffer[i] + (PAGE_SIZE * i);
+    printf("touching data from page %d to %d\n",
+           start_pg, start_pg + read_pages);
+  for (size_t i = start_pg; i < start_pg + read_pages; i++) {
+    for (size_t j = 0; j < PAGE_SIZE; j++)
+      tmp += lmdb_buffer[PAGE_SIZE * i + j];
   }
-  start_pg += num_read_pages;
-  end_pg += num_read_pages;
 }
 
 /* a process with local rank = 0 is a reader  */
@@ -576,6 +575,5 @@ lmdbio::io_stat lmdbio::db::get_read_stat() {
 lmdbio::io_stat lmdbio::db::get_parse_stat() {
   return parse_stat;
 }
-
 
 #endif
