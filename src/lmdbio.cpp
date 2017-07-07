@@ -363,7 +363,7 @@ bool lmdbio::db::is_reader() {
 
 int lmdbio::db::read_record_batch(void) 
 {
-    MPI_Barrier(local_comm);
+  //MPI_Barrier(local_comm);
   if (is_reader())
     read_batch();
   if (dist_mode == MODE_SCATTERV)
