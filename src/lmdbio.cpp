@@ -156,8 +156,10 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   else if (dist_mode == MODE_SHMEM) {
     MPI_Win_allocate_shared(subbatch_size * sizeof(int), sizeof(int),
         MPI_INFO_NULL, local_comm, &sizes, &size_win);
+    MPI_Win_lock_all(MPI_MODE_NOCHECK, size_win);
     MPI_Win_allocate_shared(win_size, sizeof(char), MPI_INFO_NULL, local_comm,
         &subbatch_bytes, &batch_win);
+    MPI_Win_lock_all(MPI_MODE_NOCHECK, batch_win);
   }
 
   /* allocate record's array */
@@ -376,7 +378,7 @@ void lmdbio::db::read_batch() {
   }
 
   /* determine if the data is larger than a buffer */
-  assert(total_byte_size <= win_size * global_np);
+  assert(total_byte_size <= win_size * local_np);
 
 #ifdef ICPADS
   /* move a cursor to the next location */
@@ -484,13 +486,11 @@ void lmdbio::db::set_records() {
   double start;
 #endif
   if (dist_mode == MODE_SHMEM) {
-    MPI_Win_lock(MPI_LOCK_SHARED, 0, MPI_MODE_NOCHECK, batch_win);
     MPI_Win_sync(batch_win);
-    MPI_Win_unlock(0, batch_win);
+    MPI_Win_sync(size_win);
     MPI_Barrier(local_comm);
-    MPI_Win_lock(MPI_LOCK_SHARED, 0, MPI_MODE_NOCHECK, batch_win);
     MPI_Win_sync(batch_win);
-    MPI_Win_unlock(0, batch_win);
+    MPI_Win_sync(size_win);
   }
 #ifdef BENCHMARK
   start = MPI_Wtime();
@@ -540,6 +540,7 @@ bool lmdbio::db::is_reader() {
 
 int lmdbio::db::read_record_batch(void) 
 {
+  //MPI_Barrier(local_comm);
   if (is_reader())
     read_batch();
   if (dist_mode == MODE_SCATTERV)

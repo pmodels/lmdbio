@@ -122,6 +122,8 @@ public:
     }
    
     if (dist_mode == MODE_SHMEM) {
+      MPI_Win_unlock_all(batch_win);
+      MPI_Win_unlock_all(size_win);
       MPI_Win_free(&batch_win);
       MPI_Win_free(&size_win);
     }
