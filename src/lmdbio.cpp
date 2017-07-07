@@ -303,8 +303,15 @@ void lmdbio::db::set_records() {
 #ifdef BENCHMARK
   double start;
 #endif
-  if (dist_mode == MODE_SHMEM)
+  if (dist_mode == MODE_SHMEM) {
+    MPI_Win_lock(MPI_LOCK_SHARED, 0, MPI_MODE_NOCHECK, batch_win);
+    MPI_Win_sync(batch_win);
+    MPI_Win_unlock(0, batch_win);
     MPI_Barrier(local_comm);
+    MPI_Win_lock(MPI_LOCK_SHARED, 0, MPI_MODE_NOCHECK, batch_win);
+    MPI_Win_sync(batch_win);
+    MPI_Win_unlock(0, batch_win);
+  }
 #ifdef BENCHMARK
   start = MPI_Wtime();
 #endif
