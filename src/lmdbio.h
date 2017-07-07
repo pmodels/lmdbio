@@ -112,6 +112,12 @@ public:
   void set_mode(int dist_mode, int read_mode);
 
   ~db() {
+      if (dist_mode == MODE_SHMEM) {
+          MPI_Win_unlock_all(batch_win);
+          MPI_Win_unlock_all(size_win);
+          MPI_Win_free(&batch_win);
+          MPI_Win_free(&size_win);
+      }
     /*if (is_reader()) {
       mdb_cursor_close(mdb_cursor);
       mdb_dbi_close(mdb_env_, mdb_dbi_);
@@ -277,8 +283,8 @@ private:
   void lmdb_init_cursor() {
     int offset = 0;
     lmdb_seek_to_first();
-    std::cout << "Read mode " << read_mode << " MODE_STRIDE " << 
-      MODE_STRIDE << " MODE_CONT " << MODE_CONT <<  std::endl;
+    //std::cout << "Read mode " << read_mode << " MODE_STRIDE " << 
+    //  MODE_STRIDE << " MODE_CONT " << MODE_CONT <<  std::endl;
     if (reader_id != 0)
       if (read_mode == MODE_STRIDE) {
         offset = fetch_size;

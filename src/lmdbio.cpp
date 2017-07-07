@@ -14,6 +14,8 @@
 using std::cout;
 using std::endl;
 
+
+
 void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size)
 {
 #ifdef BENCHMARK
@@ -118,9 +120,9 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   /* broadcast a size of data to allocate the shared buffer */
   cout << "BCAST" << endl;
   MPI_Bcast(&size, 1, MPI_INT, 0, MPI_COMM_WORLD);
-  cout << "BCAST SIZE " << size;
+  cout << "BCAST SIZE " << size << endl;
   this->win_size = subbatch_size * size * 2;
-
+  cout << "WIN SIZE " << win_size << endl;
   /* allocate neccessary buffer */
   cout << "FETCH SIZE " << fetch_size << endl;
   if (is_reader(local_rank))
@@ -138,10 +140,12 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   else if (dist_mode == MODE_SHMEM) {
     MPI_Win_allocate_shared(subbatch_size * sizeof(int), sizeof(int),
         MPI_INFO_NULL, local_comm, &sizes, &size_win);
+    MPI_Win_lock_all(MPI_MODE_NOCHECK, size_win);
     MPI_Win_allocate_shared(win_size, sizeof(char), MPI_INFO_NULL, local_comm,
         &subbatch_bytes, &batch_win);
+    MPI_Win_lock_all(MPI_MODE_NOCHECK, batch_win);
+    //printf("shared memory buffer is %p\n", subbatch_bytes);
   }
-
   /* allocate record's array */
   this->records = new (std::nothrow) record[subbatch_size];
 }
@@ -178,6 +182,7 @@ void lmdbio::db::read_batch() {
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
 #endif
+  //cout << "read batch start\n"; 
   /* compute size of send buffer and get pointers */
   count = 0;
   total_byte_size = 0;
@@ -204,7 +209,7 @@ void lmdbio::db::read_batch() {
   }
   else if (dist_mode == MODE_SHMEM) {
     read_sizes = this->sizes;
-    for (int i = 0; i < fetch_size; i++) {
+      for (int i = 0; i < fetch_size; i++) {
       size = lmdb_value_size();
       batch_ptrs[i] = (char*) lmdb_value_data();
       read_sizes[i] = size;
@@ -214,7 +219,7 @@ void lmdbio::db::read_batch() {
   }
 
   /* determine if the data is larger than a buffer */
-  assert(total_byte_size <= win_size * global_np);
+  assert(total_byte_size <= win_size * local_np);
 
   /* move a cursor to the next location */
   if (read_mode == MODE_STRIDE && global_np != 1)
@@ -247,9 +252,11 @@ void lmdbio::db::read_batch() {
   else if (dist_mode == MODE_SHMEM) {
     for (int i = 0; i < fetch_size; i++) {
       size = read_sizes[i];
-      if (i % subbatch_size == 0)
+      if (i % subbatch_size == 0) {
         count = (i / subbatch_size) * win_size;
+      }
       memcpy(subbatch_bytes + count, batch_ptrs[i], size);
+      //printf("copying image[%d] to %p of size %d\n", i, subbatch_bytes + count, size);
       count += size;
     }
   }
@@ -265,6 +272,7 @@ void lmdbio::db::read_batch() {
       get_inv_ctx_switches(rstart, rend),
       ttime, utime, stime, sltime);
 #endif
+  //cout << "read batch end\n"; 
 }
 
 void lmdbio::db::send_batch() {
@@ -303,27 +311,31 @@ void lmdbio::db::set_records() {
 #ifdef BENCHMARK
   double start;
 #endif
+  //cout << "set records start\n";
   if (dist_mode == MODE_SHMEM) {
-    MPI_Win_lock(MPI_LOCK_SHARED, 0, MPI_MODE_NOCHECK, batch_win);
     MPI_Win_sync(batch_win);
-    MPI_Win_unlock(0, batch_win);
+    MPI_Win_sync(size_win);
+
     MPI_Barrier(local_comm);
-    MPI_Win_lock(MPI_LOCK_SHARED, 0, MPI_MODE_NOCHECK, batch_win);
+
     MPI_Win_sync(batch_win);
-    MPI_Win_unlock(0, batch_win);
+    MPI_Win_sync(size_win);
   }
 #ifdef BENCHMARK
   start = MPI_Wtime();
 #endif
   for (int i = 0; i < subbatch_size; i++) {
+    //cout << "item " << i << endl;
     size = sizes[i];
     records[i].set_record(subbatch_bytes + count, size);
+    //printf("set record %p, data %p, size %d\n", &records[i], records[i].data, size);
     count += size;
   }
   int fsize = records[0].get_record_size();
 #ifdef BENCHMARK
  set_record_time += get_elapsed_time(start, MPI_Wtime());
 #endif
+  //cout << "set records end\n";
 }
 
 void lmdbio::db::set_mode(int dist_mode, int read_mode) {
@@ -351,6 +363,7 @@ bool lmdbio::db::is_reader() {
 
 int lmdbio::db::read_record_batch(void) 
 {
+    MPI_Barrier(local_comm);
   if (is_reader())
     read_batch();
   if (dist_mode == MODE_SCATTERV)
