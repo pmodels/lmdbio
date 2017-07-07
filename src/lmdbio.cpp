@@ -10,10 +10,26 @@
 #include <unistd.h>
 #include <assert.h>
 #include <new>
+#include <sys/mman.h>
+#include <signal.h>
 
 using std::cout;
 using std::endl;
 static int tmp = 0;
+static int num_sigsegvs = 0;
+
+#define GET_PAGE(x) ((char *) (((unsigned long long) (x)) & ~(PAGE_SIZE - 1)))
+
+int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
+{
+    num_sigsegvs++;
+    printf("got a SIGSEGV at %p\n", __sig->si_addr);
+
+    /* set the page to be accessible again */
+    mprotect(GET_PAGE(__sig->si_addr), getpagesize(), PROT_READ);
+
+    return 0;
+}
 
 void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size)
 {
@@ -156,11 +172,18 @@ void lmdbio::db::open_db(const char* fname) {
   int max_try = 200;
   int rc = 0;
   int success = 0;
+  struct sigaction __sig;
+  MDB_envinfo stat;
 
   srand(time(NULL));
   check_lmdb(mdb_env_create(&mdb_env_), "Created environment", false);
   check_lmdb(mdb_env_set_maxreaders(mdb_env_, readers), "Set maxreaders",
       false);
+
+  __sig.sa_sigaction = (void (*) (int, siginfo_t *, void *))
+      sigsegv_handler;
+  __sig.sa_flags = SA_SIGINFO;
+  //sigaction(SIGSEGV, &__sig, 0);
 
 #ifdef ICPADS
   /* random an address and fix mmap's address */
@@ -200,6 +223,12 @@ void lmdbio::db::open_db(const char* fname) {
   /* set lmdb buffer */
   strtok(addr_str, "=");
   addr = atoll(strtok(NULL, "="));
+  lmdb_buffer = (char*) addr;
+
+  /* protect the buffer against read accesses */
+  num_sigsegvs = 0;
+  //mprotect(lmdb_buffer, (size_t) 192 * 1024 * 1024 * 1024, PROT_NONE);
+
 #else
   rc = mdb_env_open(mdb_env_, fname, flags, 0664);
   //cout << "reader " << reader_id << " error code " << rc << endl;
@@ -218,8 +247,7 @@ void lmdbio::db::open_db(const char* fname) {
     + (PAGE_SIZE * !!(sample_size % PAGE_SIZE));
   num_read_pages = (sample_size * fetch_size) / PAGE_SIZE;
 
-  lmdb_buffer = (char*) addr;
-  read_pages = num_read_pages;
+  max_read_pages = min_read_pages = read_pages = num_read_pages;
   printf("LMDB buffer address %p\n", lmdb_buffer);
 
   /* skip the first few pages as they are the meta pages */
@@ -249,7 +277,7 @@ void lmdbio::db::read_batch() {
 
 #ifdef ICPADS
   //cout << "touching pages\n";
-  lmdb_touch_pages();
+  //lmdb_touch_pages();
   //cout << "done touching pages\n";
 
   if (reader_id != 0) {
@@ -305,6 +333,7 @@ void lmdbio::db::read_batch() {
   }
   else if (dist_mode == MODE_SHMEM) {
       size_t start, end;
+      size_t fetch_start, fetch_end;
     read_sizes = this->sizes;
     lmdb_get_current();
     for (int i = 0; i < fetch_size; i++) {
@@ -315,12 +344,35 @@ void lmdbio::db::read_batch() {
       total_byte_size += size;
       lmdb_next();
     }
+
+    fetch_start = (batch_ptrs[0] - lmdb_buffer) / getpagesize();
+    fetch_end = (batch_ptrs[fetch_size - 1] - lmdb_buffer) / getpagesize();
+
+    /*
     printf("fetched data from page %lld to %lld\n",
-           (batch_ptrs[0] - lmdb_buffer) / getpagesize(),
-           (batch_ptrs[fetch_size - 1] - lmdb_buffer) / getpagesize());
+           fetch_start, fetch_end);
+    */
+
+    num_missed_pages += 
+        (fetch_start < start_pg ? start_pg - fetch_start : 0) +
+        (fetch_end > start_pg + read_pages ? fetch_end - start_pg - read_pages : 0);
+    //printf("total num missed pages so far: %d\n", num_missed_pages);
+
+    num_extra_pages +=
+        (fetch_start > start_pg ? fetch_start - start_pg : 0) +
+        (fetch_end < start_pg + read_pages ? start_pg + read_pages - fetch_end : 0);
+    //printf("total num extra pages so far: %d\n", num_extra_pages);
+
     read_pages = (batch_ptrs[fetch_size - 1] - batch_ptrs[0]) / getpagesize();
+    read_pages++;
+    if (read_pages < min_read_pages)
+        min_read_pages = read_pages;
+    if (read_pages > max_read_pages)
+        max_read_pages = read_pages;
+
     start = (size_t) (batch_ptrs[0] - lmdb_buffer) / getpagesize();
-    start_pg = start + (read_pages * readers);
+    start_pg = start + (min_read_pages * readers);
+    read_pages = max_read_pages + (max_read_pages - min_read_pages) * readers;
   }
 
   /* determine if the data is larger than a buffer */
@@ -462,11 +514,11 @@ void lmdbio::db::set_mode(int dist_mode, int read_mode) {
 }
 
 void lmdbio::db::lmdb_touch_pages() {
-    printf("touching data from page %d to %d\n",
-           start_pg, start_pg + read_pages);
+    //printf("touching data from page %d to %d\n",
+    //       start_pg, start_pg + read_pages);
   for (size_t i = start_pg; i < start_pg + read_pages; i++) {
-    for (size_t j = 0; j < PAGE_SIZE; j++)
-      tmp += lmdb_buffer[PAGE_SIZE * i + j];
+      //for (size_t j = 0; j < PAGE_SIZE; j++)
+      tmp += lmdb_buffer[PAGE_SIZE * i];
   }
 }
 

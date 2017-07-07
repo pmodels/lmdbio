@@ -107,6 +107,8 @@ public:
   db() {
     dist_mode = MODE_SHMEM;
     read_mode = MODE_STRIDE;
+    num_missed_pages = 0;
+    num_extra_pages = 0;
   }
 
   void init(MPI_Comm parent_comm, const char *fname, int batch_size);
@@ -188,7 +190,10 @@ private:
   int read_mode;
   char* lmdb_buffer;
   int read_pages;
+  int min_read_pages, max_read_pages;
   int start_pg;
+  int num_missed_pages;
+  int num_extra_pages;
 
   void assign_readers(const char* fname, int batch_size);
   void open_db(const char* fname);
