@@ -10,11 +10,29 @@
 #include <unistd.h>
 #include <assert.h>
 #include <new>
+#include <signal.h>
 
 using std::cout;
 using std::endl;
 
+static uint64_t num_page_faults = 0;
 
+#define GET_PAGE(x) ((char *) (((unsigned long long) (x)) & ~(getpagesize() - 1)))
+
+int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
+{
+  num_page_faults++;
+  printf("got a SIGSEGV at %p, num_page_faults %llu\n", __sig->si_addr,
+      num_page_faults);
+  /* set the page to be accessible again */
+  printf("unprotecting page %p, %d bytes\n", GET_PAGE(__sig->si_addr), getpagesize());
+  if (GET_PAGE(__sig->si_addr) == __sig->si_addr)
+    mprotect(GET_PAGE(__sig->si_addr), getpagesize(), PROT_READ);
+  else
+    mprotect(GET_PAGE(__sig->si_addr), getpagesize(), PROT_READ | PROT_EXEC);
+
+  return 0;
+}
 
 void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size)
 {
@@ -104,8 +122,6 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 #endif
     cout << "OPEN DB" << endl;
     open_db(fname);
-    lmdb_print_stat();
-
 #ifdef BENCHMARK
     end_db = MPI_Wtime();
     this->open_db_time = get_elapsed_time(start_db, end_db);
@@ -153,6 +169,23 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 /* open the database and initialize a position of a cursor */
 void lmdbio::db::open_db(const char* fname) {
   int flags = MDB_RDONLY | MDB_NOTLS | MDB_NOLOCK;
+  struct sigaction __sig;
+  char addr_str[100];
+
+  srand(time(NULL));
+
+  if (!strcmp(getenv("ENABLE_MPROTECT"), "1")) {
+    __sig.sa_sigaction = (void (*) (int, siginfo_t *, void *))
+      sigsegv_handler;
+    __sig.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &__sig, 0);
+  }
+
+  mmap_addr = (size_t) getpagesize() * rand();
+  snprintf(addr_str, 100, "MMAP_ADDRESS=%llu", mmap_addr);
+  cout << addr_str << endl;
+  putenv(addr_str);
+
   check_lmdb(mdb_env_create(&mdb_env_), "Created environment", false);
   check_lmdb(mdb_env_set_maxreaders(mdb_env_, readers), "Set maxreaders",
       false);

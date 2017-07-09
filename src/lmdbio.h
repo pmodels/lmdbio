@@ -16,6 +16,7 @@
 #include <sys/resource.h>
 #include <vector>
 #include <string>
+#include <sys/mman.h>
 
 using std::vector;
 using std::string;
@@ -189,6 +190,7 @@ private:
   int valid_;
   int dist_mode;
   int read_mode;
+  size_t mmap_addr;
 
   void assign_readers(const char* fname, int batch_size);
   void open_db(const char* fname);
@@ -257,6 +259,15 @@ private:
 
   void lmdb_seek_multiple(int skip_size) {
     int mdb_status = 0;
+    MDB_envinfo stat;
+
+    /* protect the buffer against read accesses */
+    mdb_env_info(mdb_env_, &stat);
+    if (!strcmp(getenv("ENABLE_MPROTECT"), "1")) {
+      printf("protecting buffer %p, starting seek %d\n", (void*) mmap_addr, skip_size - 1);
+      mprotect((void*) mmap_addr, (size_t) stat.me_mapsize, PROT_NONE);
+    }
+
     for (int i = 0; i < skip_size - 1; i++) {
       mdb_status = mdb_cursor_get(mdb_cursor, NULL, NULL, MDB_NEXT);
       if (mdb_status == MDB_NOTFOUND) {
@@ -265,6 +276,12 @@ private:
         check_lmdb(mdb_status, "Seek multiple", false);
       }
     }
+
+    if (!strcmp(getenv("ENABLE_MPROTECT"), "1")) {
+      printf("unprotecting buffer\n");
+      mprotect((void*) mmap_addr, (size_t) stat.me_mapsize, PROT_READ);
+    }
+
     lmdb_seek(MDB_NEXT);
   }
 
