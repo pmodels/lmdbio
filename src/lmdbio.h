@@ -128,7 +128,7 @@ public:
       MPI_Win_free(&size_win);
     }
     delete[] records;
-    MPI_Comm_free(&global_comm);
+    //MPI_Comm_free(&global_comm);
   }
 
   int read_record_batch(void ***records, int *num_records, int **record_sizes);

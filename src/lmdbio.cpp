@@ -16,17 +16,22 @@
 using std::cout;
 using std::endl;
 static int tmp = 0;
-static int num_sigsegvs = 0;
+static uint64_t num_page_faults = 0;
 
 #define GET_PAGE(x) ((char *) (((unsigned long long) (x)) & ~(PAGE_SIZE - 1)))
 
 int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 {
-    num_sigsegvs++;
-    printf("got a SIGSEGV at %p\n", __sig->si_addr);
+    num_page_faults++;
+    printf("got a SIGSEGV at %p, num_page_faults %llu\n", __sig->si_addr,
+           num_page_faults);
 
     /* set the page to be accessible again */
-    mprotect(GET_PAGE(__sig->si_addr), getpagesize(), PROT_READ);
+    printf("unprotecting page %p, %d bytes\n", GET_PAGE(__sig->si_addr), getpagesize());
+    if (GET_PAGE(__sig->si_addr) == __sig->si_addr)
+        mprotect(GET_PAGE(__sig->si_addr), getpagesize(), PROT_READ);
+    else
+        mprotect(GET_PAGE(__sig->si_addr), getpagesize(), PROT_READ | PROT_EXEC);
 
     return 0;
 }
@@ -182,10 +187,12 @@ void lmdbio::db::open_db(const char* fname) {
   check_lmdb(mdb_env_set_maxreaders(mdb_env_, readers), "Set maxreaders",
       false);
 
-  __sig.sa_sigaction = (void (*) (int, siginfo_t *, void *))
-      sigsegv_handler;
-  __sig.sa_flags = SA_SIGINFO;
-  //sigaction(SIGSEGV, &__sig, 0);
+  if (!strcmp(getenv("ENABLE_MPROTECT"), "1")) {
+      __sig.sa_sigaction = (void (*) (int, siginfo_t *, void *))
+          sigsegv_handler;
+      __sig.sa_flags = SA_SIGINFO;
+      sigaction(SIGSEGV, &__sig, 0);
+  }
 
 #ifdef ICPADS
   /* random an address and fix mmap's address */
@@ -206,6 +213,7 @@ void lmdbio::db::open_db(const char* fname) {
     MPI_Bcast(addr_str, 100, MPI_CHAR, 0, reader_comm);
     if (global_rank != 0) {
       putenv(addr_str);
+      cout << "trying to mmap with address " << addr_str << endl;
       rc = mdb_env_open(mdb_env_, fname, flags, 0664);
       //cout << "reader " << reader_id << " error code " << rc << endl;
     }
@@ -226,10 +234,6 @@ void lmdbio::db::open_db(const char* fname) {
   strtok(addr_str, "=");
   addr = atoll(strtok(NULL, "="));
   lmdb_buffer = (char*) addr;
-
-  /* protect the buffer against read accesses */
-  num_sigsegvs = 0;
-  //mprotect(lmdb_buffer, (size_t) 192 * 1024 * 1024 * 1024, PROT_NONE);
 
 #else
   rc = mdb_env_open(mdb_env_, fname, flags, 0664);
@@ -258,6 +262,13 @@ void lmdbio::db::open_db(const char* fname) {
       start_pg += 3;
   printf("setting start page to %d\n", start_pg);
   fflush(stdout);
+
+  /* protect the buffer against read accesses */
+  mdb_env_info(mdb_env_, &stat);
+  if (!strcmp(getenv("ENABLE_MPROTECT"), "1")) {
+      printf("protecting buffer %p\n", lmdb_buffer);
+      mprotect(lmdb_buffer, (size_t) stat.me_mapsize, PROT_NONE);
+  }
 }
 
 /* a function for readers */
@@ -279,7 +290,7 @@ void lmdbio::db::read_batch() {
 
 #ifdef ICPADS
   //cout << "touching pages\n";
-  //lmdb_touch_pages();
+  lmdb_touch_pages();
   //cout << "done touching pages\n";
 
   if (reader_id != 0) {
@@ -522,11 +533,13 @@ void lmdbio::db::set_mode(int dist_mode, int read_mode) {
 
 void lmdbio::db::lmdb_touch_pages() {
     //printf("touching data from page %d to %d\n",
-    //       start_pg, start_pg + read_pages);
+    //start_pg, start_pg + read_pages);
   for (size_t i = start_pg; i < start_pg + read_pages; i++) {
+      printf("touching page %d\n", i);
       //for (size_t j = 0; j < PAGE_SIZE; j++)
       tmp += lmdb_buffer[PAGE_SIZE * i];
   }
+  printf("done touching pages\n");
 }
 
 /* a process with local rank = 0 is a reader  */
