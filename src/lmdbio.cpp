@@ -174,7 +174,8 @@ void lmdbio::db::open_db(const char* fname) {
 
   srand(time(NULL));
 
-  if (!strcmp(getenv("ENABLE_MPROTECT"), "1")) {
+  char *e = getenv("ENABLE_MPROTECT");
+  if (e && !strcmp(e, "1")) {
     __sig.sa_sigaction = (void (*) (int, siginfo_t *, void *))
       sigsegv_handler;
     __sig.sa_flags = SA_SIGINFO;

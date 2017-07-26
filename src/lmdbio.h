@@ -263,7 +263,8 @@ private:
 
     /* protect the buffer against read accesses */
     mdb_env_info(mdb_env_, &stat);
-    if (!strcmp(getenv("ENABLE_MPROTECT"), "1")) {
+    char *e = getenv("ENABLE_MPROTECT");
+    if (e && !strcmp(e, "1")) {
       printf("protecting buffer %p, starting seek %d\n", (void*) mmap_addr, skip_size - 1);
       mprotect((void*) mmap_addr, (size_t) stat.me_mapsize, PROT_NONE);
     }
@@ -277,7 +278,7 @@ private:
       }
     }
 
-    if (!strcmp(getenv("ENABLE_MPROTECT"), "1")) {
+    if (e && !strcmp(e, "1")) {
       printf("unprotecting buffer\n");
       mprotect((void*) mmap_addr, (size_t) stat.me_mapsize, PROT_READ);
     }
