@@ -187,7 +187,8 @@ void lmdbio::db::open_db(const char* fname) {
   check_lmdb(mdb_env_set_maxreaders(mdb_env_, readers), "Set maxreaders",
       false);
 
-  if (!strcmp(getenv("ENABLE_MPROTECT"), "1")) {
+  char *e = getenv("ENABLE_MPROTECT");
+  if (e && !strcmp(e, "1")) {
       __sig.sa_sigaction = (void (*) (int, siginfo_t *, void *))
           sigsegv_handler;
       __sig.sa_flags = SA_SIGINFO;
@@ -265,7 +266,8 @@ void lmdbio::db::open_db(const char* fname) {
 
   /* protect the buffer against read accesses */
   mdb_env_info(mdb_env_, &stat);
-  if (!strcmp(getenv("ENABLE_MPROTECT"), "1")) {
+
+  if (e && !strcmp(e, "1")) {
       printf("protecting buffer %p\n", lmdb_buffer);
       mprotect(lmdb_buffer, (size_t) stat.me_mapsize, PROT_NONE);
   }
