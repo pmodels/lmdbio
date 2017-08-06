@@ -125,7 +125,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 #endif
     //cout << "OPEN DB" << endl;
     open_db(fname);
-    printf("tmp %d\n", tmp);
+    //printf("tmp %d\n", tmp);
 
 #ifdef BENCHMARK
     end_db = MPI_Wtime();
@@ -363,18 +363,18 @@ void lmdbio::db::read_batch() {
     fetch_start = (batch_ptrs[0] - lmdb_buffer) / getpagesize();
     fetch_end = (batch_ptrs[fetch_size - 1] - lmdb_buffer) / getpagesize();
     
-    printf("fetched data from page %lld to %lld\n",
-           fetch_start, fetch_end);
+    /*printf("fetched data from page %lld to %lld\n",
+           fetch_start, fetch_end);*/
     
     num_missed_pages += 
         (fetch_start < start_pg ? start_pg - fetch_start : 0) +
         (fetch_end > start_pg + read_pages ? fetch_end - start_pg - read_pages : 0);
-    printf("total num missed pages so far: %d\n", num_missed_pages);
+    //printf("total num missed pages so far: %d\n", num_missed_pages);
 
     num_extra_pages +=
         (fetch_start > start_pg ? fetch_start - start_pg : 0) +
         (fetch_end < start_pg + read_pages ? start_pg + read_pages - fetch_end : 0);
-    printf("total num extra pages so far: %d\n", num_extra_pages);
+    //printf("total num extra pages so far: %d\n", num_extra_pages);
 
     read_pages = (batch_ptrs[fetch_size - 1] - batch_ptrs[0]) * (fetch_size + 1) /
         (fetch_size * getpagesize());
@@ -383,7 +383,7 @@ void lmdbio::db::read_batch() {
     if (read_pages > max_read_pages)
         max_read_pages = read_pages;
 
-    printf("min read pages %d max read pages %d\n", min_read_pages, max_read_pages);
+    //printf("min read pages %d max read pages %d\n", min_read_pages, max_read_pages);
 
     start = (size_t) (batch_ptrs[0] - lmdb_buffer) / getpagesize();
     start_pg = start + (min_read_pages * readers);
@@ -535,8 +535,8 @@ void lmdbio::db::set_mode(int dist_mode, int read_mode) {
 }
 
 void lmdbio::db::lmdb_touch_pages() {
-  printf("touching data from page %d to %d\n",
-      start_pg, start_pg + read_pages);
+  /*printf("touching data from page %d to %d\n",
+      start_pg, start_pg + read_pages);*/
   for (size_t i = start_pg; i < start_pg + read_pages; i++) {
       //printf("touching page %d\n", i);
       //for (size_t j = 0; j < PAGE_SIZE; j++)
