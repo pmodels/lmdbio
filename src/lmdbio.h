@@ -303,7 +303,7 @@ private:
     lmdb_seek_to_first();
     //std::cout << "Read mode " << read_mode << " MODE_STRIDE " << 
     //  MODE_STRIDE << " MODE_CONT " << MODE_CONT <<  std::endl;
-    if (reader_id != 0)
+    if (reader_id != 0) {
       if (read_mode == MODE_STRIDE) {
         offset = fetch_size;
       }
@@ -313,8 +313,9 @@ private:
         std::cout << "Number of records " << stat.ms_entries << std::endl;
         offset = stat.ms_entries / readers;
       }
-    std::cout << "Reader " << reader_id << " offset " << offset << std::endl;
-    lmdb_seek_multiple(reader_id * offset);
+      std::cout << "Reader " << reader_id << " offset " << offset << std::endl;
+      lmdb_seek_multiple(reader_id * offset);
+    }
   }
 
   string key() {
