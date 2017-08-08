@@ -23,3 +23,5 @@
 /src/.libs/
 /src/lmdbio.lo
 /src/lmdbio.o
+build
+examples/test*
