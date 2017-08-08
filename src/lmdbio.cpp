@@ -111,7 +111,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   MPI_Allreduce(&is_rank_0, &node_size, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
   /* get a number of readers */
-  reader_size = reader_size ? reader_size : node_size;
+  reader_size = reader_size && reader_size >= node_size ? reader_size : node_size;
 
   /* get a number of readers within a node */
   local_reader_size = reader_size / node_size;
