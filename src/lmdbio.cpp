@@ -154,6 +154,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
       " on host " << hostname << endl;
 
     fetch_size = batch_size / reader_size;
+    assert(fetch_size);
   }
 
   MPI_Barrier(MPI_COMM_WORLD);
