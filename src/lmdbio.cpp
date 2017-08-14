@@ -68,8 +68,8 @@ void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
   assert(rc == 0);
 }
 
-void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size)
-{
+void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
+    int reader_size) {
 #ifdef BENCHMARK
   double start, end;
   this->mpi_time = 0.0;
@@ -104,7 +104,15 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size)
   this->init_var_time = get_elapsed_time(start, end);
   start = MPI_Wtime();
 #endif
+
+  this->reader_size = reader_size;
+  assert(reader_size <= global_np);
+  cout << "Reader size is set to " << reader_size << endl;
+
+  this->local_reader_size = 0;
+
   assign_readers(fname, batch_size);
+
 #ifdef BENCHMARK
   end = MPI_Wtime();
   this->init_db_time = get_elapsed_time(start, end);
@@ -115,9 +123,11 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size)
 void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   int size = 0;
   string mmap_env;
+  int is_rank_0 = 0;
+  int is_reader_ = 0;
+  int sublocal_id = 0;
   local_rank = 0;
   local_np = 0;
-  readers = 0;
   reader_id = 0;
   fetch_size = 0;
 
@@ -129,27 +139,59 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   MPI_Comm_size(local_comm, &local_np);
   MPI_Comm_rank(local_comm, &local_rank);
 
+  /* get number of nodes */
+  is_rank_0 = local_rank == 0 ? 1 : 0;
+  MPI_Allreduce(&is_rank_0, &node_size, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+
+  /* get a number of readers */
+  reader_size = reader_size && reader_size >= node_size ? reader_size : node_size;
+
+  /* get a number of readers within a node */
+  local_reader_size = reader_size / node_size;
+  assert(local_reader_size);
+
+  //cout << "Local reader size is " << local_reader_size << endl;
+
+  is_single_reader_per_node = local_reader_size == 1;
+
+  /* communicator between the reader and processes */
+  if (!is_single_reader_per_node) {
+    sublocal_id = local_rank / (local_np / local_reader_size);
+    sublocal_comm = MPI_COMM_NULL;
+    MPI_Comm_split(local_comm, sublocal_id, local_rank, &sublocal_comm);
+    assert(sublocal_comm != MPI_COMM_NULL);
+    MPI_Comm_size(sublocal_comm, &sublocal_np);
+    MPI_Comm_rank(sublocal_comm, &sublocal_rank);
+    //cout << "Rank " << global_rank << " sublocal id " << sublocal_id << 
+    //  " sublocal rank " << sublocal_rank << endl;
+  }
+
   /* get number of readers */
-  int is_reader_ = is_reader(local_rank) ? 1 : 0;
+  is_reader_ = is_reader() ? 1 : MPI_UNDEFINED;
 
   /* communicator between readers */
   reader_comm = MPI_COMM_NULL;
   MPI_Comm_split(MPI_COMM_WORLD, is_reader_, global_rank, &reader_comm);
-  assert(reader_comm != MPI_COMM_NULL);
-  MPI_Comm_size(reader_comm, &readers);
-  MPI_Comm_rank(reader_comm, &reader_id);
+  if (is_reader()) {
+    assert(reader_comm != MPI_COMM_NULL);
+    MPI_Comm_size(reader_comm, &reader_size);
+    MPI_Comm_rank(reader_comm, &reader_id);
+  }
 
   /* open database and set fetch size */
   if (is_reader(local_rank)) {
     char hostname[256];
     gethostname(hostname, 255);
-    cout << "Number of readers " << readers << endl;
+    cout << "Number of readers " << reader_size << endl;
     cout << "Rank " << global_rank << " is a reader id " << reader_id << 
       " on host " << hostname << endl;
 
-    fetch_size = batch_size / readers;
+    fetch_size = batch_size / reader_size;
+    assert(fetch_size);
   }
+
   MPI_Barrier(MPI_COMM_WORLD);
+
   if (is_reader(local_rank)) {
 #ifdef BENCHMARK
     double end_db, start_db;
@@ -164,7 +206,9 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
     this->open_db_time = get_elapsed_time(start_db, end_db);
 #endif
   }
+
   MPI_Barrier(MPI_COMM_WORLD);
+
   if (global_rank == 0) {
     /* get size */
     size = lmdb_value_size();
@@ -181,19 +225,21 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
     batch_ptrs = new char*[fetch_size];
   if (dist_mode == MODE_SCATTERV) {
     if (is_reader(local_rank)) {
+      int io_np = get_io_np();
       send_sizes = new int[fetch_size];
-      send_displs = new int[local_np];
-      send_counts = new int[local_np];
+      send_displs = new int[io_np];
+      send_counts = new int[io_np];
       batch_bytes = (char*) malloc(fetch_size * size * 2 * sizeof(char));
     }
     sizes = new int[subbatch_size];
     subbatch_bytes = (char*) malloc(win_size);
   }
   else if (dist_mode == MODE_SHMEM) {
+    MPI_Comm io_comm = get_io_comm();
     MPI_Win_allocate_shared(subbatch_size * sizeof(int), sizeof(int),
-        MPI_INFO_NULL, local_comm, &sizes, &size_win);
+        MPI_INFO_NULL, io_comm, &sizes, &size_win);
     MPI_Win_lock_all(MPI_MODE_NOCHECK, size_win);
-    MPI_Win_allocate_shared(win_size, sizeof(char), MPI_INFO_NULL, local_comm,
+    MPI_Win_allocate_shared(win_size, sizeof(char), MPI_INFO_NULL, io_comm,
         &subbatch_bytes, &batch_win);
     MPI_Win_lock_all(MPI_MODE_NOCHECK, batch_win);
   }
@@ -228,7 +274,7 @@ void lmdbio::db::open_db(const char* fname) {
 
   srand(time(NULL));
   check_lmdb(mdb_env_create(&mdb_env_), "Created environment", false);
-  check_lmdb(mdb_env_set_maxreaders(mdb_env_, readers), "Set maxreaders",
+  check_lmdb(mdb_env_set_maxreaders(mdb_env_, reader_size), "Set maxreaders",
       false);
 
   char *e = getenv("ENABLE_MPROTECT");
@@ -243,7 +289,7 @@ void lmdbio::db::open_db(const char* fname) {
   /* random an address and fix mmap's address */
   for (int i = 0; i < max_try; i++) {
     if (global_rank == 0) {
-      addr = (size_t) PAGE_SIZE * rand();
+      addr = (size_t) getpagesize() * rand();
       snprintf(addr_str, 100, "MMAP_ADDRESS=%llu", addr);
       cout << addr_str << endl;
       putenv(addr_str);
@@ -375,7 +421,7 @@ void lmdbio::db::read_batch() {
     mdb_serialize_cursor(mdb_cursor, &start_cursor_buffer, &cursor_buffer_size);
   }
 
-  if (reader_id != readers - 1) {
+  if (reader_id != reader_size - 1) {
     /* shift the cursor */
     lmdb_seek_multiple(fetch_size);
 
@@ -424,6 +470,7 @@ void lmdbio::db::read_batch() {
       batch_ptrs[i] = (char*) lmdb_value_data();
       read_sizes[i] = size;
       total_byte_size += size;
+      //cout << "reader " << reader_id << ": " << key() << endl;
       lmdb_next();
     }
 
@@ -453,12 +500,12 @@ void lmdbio::db::read_batch() {
     //printf("min read pages %d max read pages %d\n", min_read_pages, max_read_pages);
 
     start = (size_t) (batch_ptrs[0] - lmdb_buffer) / getpagesize();
-    start_pg = start + (min_read_pages * readers);
-    read_pages = max_read_pages + (max_read_pages - min_read_pages) * readers;
+    start_pg = start + (min_read_pages * reader_size);
+    read_pages = max_read_pages + (max_read_pages - min_read_pages) * reader_size;
   }
 
   /* determine if the data is larger than a buffer */
-  assert(total_byte_size <= win_size * local_np);
+  assert(total_byte_size <= win_size * get_io_np());
 
 #ifdef ICPADS
   /* move a cursor to the next location */
@@ -481,7 +528,7 @@ void lmdbio::db::read_batch() {
   }
 #else
   /* shift the cursor */
-  lmdb_seek_multiple(fetch_size * (readers - 1));
+  lmdb_seek_multiple(fetch_size * (reader_size - 1));
 #endif
 
 #ifdef BENCHMARK
@@ -537,10 +584,11 @@ void lmdbio::db::send_batch() {
   double start;
   start = MPI_Wtime();
 #endif
+  MPI_Comm comm = get_io_comm();
   //cout << "send batch " << send_sizes[0] << endl;
   /* send data size */
   MPI_Scatter(send_sizes, subbatch_size, MPI_INT, sizes, subbatch_size, MPI_INT,
-      0, local_comm);
+      0, comm);
 
   //cout << "scatter size completed" << endl; 
   /* get total size */
@@ -551,7 +599,7 @@ void lmdbio::db::send_batch() {
   //cout << "count size completed" << endl;
   /* send sub-batch */
   MPI_Scatterv(batch_bytes, send_counts, send_displs, MPI_BYTE,
-      subbatch_bytes, count, MPI_BYTE, 0, local_comm);
+      subbatch_bytes, count, MPI_BYTE, 0, comm);
 
   //cout << "scatterv batch completed" << endl;
 #ifdef BENCHMARK
@@ -569,7 +617,7 @@ void lmdbio::db::set_records() {
   if (dist_mode == MODE_SHMEM) {
     MPI_Win_sync(batch_win);
     MPI_Win_sync(size_win);
-    MPI_Barrier(local_comm);
+    MPI_Barrier(get_io_comm());
     MPI_Win_sync(batch_win);
     MPI_Win_sync(size_win);
   }
@@ -614,7 +662,10 @@ void lmdbio::db::lmdb_touch_pages() {
 
 /* a process with local rank = 0 is a reader  */
 bool lmdbio::db::is_reader(int local_rank) {
-  return local_rank == 0;
+  if (is_single_reader_per_node)
+    return local_rank == 0;
+  else
+    return sublocal_rank == 0;
 }
 
 bool lmdbio::db::is_reader() {
@@ -623,8 +674,9 @@ bool lmdbio::db::is_reader() {
 
 int lmdbio::db::read_record_batch(void) 
 {
-  //MPI_Barrier(local_comm);
   if (is_reader()) {
+  //MPI_Barrier(get_io_comm());
+  if (is_reader())
     read_batch();
     lmdb_remap_buff();
   }
@@ -721,4 +773,11 @@ lmdbio::io_stat lmdbio::db::get_parse_stat() {
   return parse_stat;
 }
 
+MPI_Comm lmdbio::db::get_io_comm() {
+  return is_single_reader_per_node ? local_comm : sublocal_comm;
+}
+
+int lmdbio::db::get_io_np() {
+  return is_single_reader_per_node ? local_np : sublocal_np;
+}
 #endif

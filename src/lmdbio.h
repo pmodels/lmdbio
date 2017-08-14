@@ -111,7 +111,8 @@ public:
     num_extra_pages = 0;
   }
 
-  void init(MPI_Comm parent_comm, const char *fname, int batch_size);
+  void init(MPI_Comm parent_comm, const char *fname, int batch_size,
+      int reader_size = 0);
   void set_mode(int dist_mode, int read_mode);
 
   ~db() {
@@ -155,6 +156,7 @@ public:
 private:
   MPI_Comm global_comm;
   MPI_Comm local_comm;
+  MPI_Comm sublocal_comm;
   MPI_Comm reader_comm;
   MPI_Win batch_win;
   MPI_Win size_win;
@@ -165,13 +167,17 @@ private:
   int local_rank;
   int local_np;
   int reader_id;
+  int sublocal_np;
+  int sublocal_rank;
   char** batch_ptrs;
   int* send_sizes;
   int* sizes;
   int total_byte_size;
   int batch_size;
   int subbatch_size;
-  int readers;
+  int reader_size;
+  int local_reader_size;
+  int node_size;
   int fetch_size;
   int* send_displs;
   int* send_counts;
@@ -182,6 +188,7 @@ private:
   int sample_size;
   int num_read_pages;
   bool is_large_dataset;
+  bool is_single_reader_per_node;
   MDB_cursor* cursor;
   MDB_env* mdb_env_;
   MDB_txn* mdb_txn;
@@ -210,6 +217,8 @@ private:
   void lmdb_direct_io(int start_pg, int read_pages);
   void lmdb_load_meta();
   void lmdb_remap_buff();
+  MPI_Comm get_io_comm();
+  int get_io_np();
 
 #ifdef BENCHMARK
   double mpi_time;
@@ -282,7 +291,7 @@ private:
   }
 
   void lmdb_next_fetch() {
-    lmdb_seek_multiple((readers - 1) * fetch_size);
+    lmdb_seek_multiple((reader_size - 1) * fetch_size);
   }
 
   size_t lmdb_value_size() {
@@ -298,9 +307,10 @@ private:
     lmdb_seek_to_first();
 #if !defined(ICPADS) || !defined(DIRECTIO)
     /* shift the cursor */
-    lmdb_seek_multiple(reader_id * fetch_size);
+    if (reader_id != 0)
+      lmdb_seek_multiple(reader_id * fetch_size);
 #endif
-  }
+   }
 
   string key() {
     return string(static_cast<const char*>(mdb_key_.mv_data), mdb_key_.mv_size);
