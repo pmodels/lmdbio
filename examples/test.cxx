@@ -2,18 +2,19 @@
 #include "lmdbio.h"
 
 #define BATCH_SIZE (4096)
-#define MAX_ITER (2)
+#define MAX_ITER (100)
+#define READER_SIZE (2)
 
 int main()
 {
     int num_records = 0, rank = 0;
-    const char *filename = "/home/pumma/cifar10_alexnet_train_lmdb_large";
+    const char *filename = "/lcrc/project/radix/pumma/dl_data/cifar10_alexnet_train_lmdb_large";
     MPI_Init(NULL, NULL);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     lmdbio::db *db = new lmdbio::db();
     db->set_mode(MODE_SHMEM, MODE_STRIDE);
-    db->init(MPI_COMM_WORLD, filename, BATCH_SIZE);
+    db->init(MPI_COMM_WORLD, filename, BATCH_SIZE, READER_SIZE);
 
     //std::cout << "batch size: " << db->get_batch_size() << std::endl;
 
