@@ -48,7 +48,7 @@ int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
   return 0;
 }
 
-void lmdbio::db::lmdb_direct_io() {
+void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
   MPI_Status status;
   unsigned long long offset = start_pg * getpagesize();
   unsigned long long bytes = read_pages * getpagesize();
@@ -202,6 +202,19 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   this->records = new (std::nothrow) record[subbatch_size];
 }
 
+void lmdbio::db::lmdb_load_meta() {
+  lmdb_direct_io(0, 2);
+  mdb_set_meta(mdb_env_);
+}
+
+void lmdbio::db::lmdb_remap_buff() {
+  //printf("lmdbio: remap buff\n");
+  mdb_unmap_vdb(mdb_env_);
+  assert(mdb_create_map_vdb(mdb_env_) == 0);
+  mprotect(lmdb_buffer, (size_t) mdb_get_mapsize(mdb_env_), PROT_NONE);
+  lmdb_load_meta();
+}
+
 /* open the database and initialize a position of a cursor */
 void lmdbio::db::open_db(const char* fname) {
   int flags = MDB_RDONLY | MDB_NOTLS | MDB_NOLOCK;
@@ -286,11 +299,7 @@ void lmdbio::db::open_db(const char* fname) {
   MPI_File_open(reader_comm, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &fh);
 
   /* load meta pages (first 2 pages) */
-  unsigned int lmdb_pgsize = mdb_get_db_pgsize(mdb_env_);
-  start_pg = 0;
-  read_pages = 2;
-  lmdb_direct_io();
-  mdb_set_meta(mdb_env_);
+  lmdb_load_meta();
 #endif
 #else
   rc = mdb_env_open(mdb_env_, fname, flags, 0664);
@@ -351,7 +360,7 @@ void lmdbio::db::read_batch() {
   lmdb_touch_pages();
   //cout << "done touching pages\n";
 #elif DIRECTIO
-  lmdb_direct_io();
+  lmdb_direct_io(start_pg, read_pages);
 #endif
 #if defined(ICPADS) || defined(DIRECTIO)
   if (reader_id != 0) {
@@ -615,8 +624,10 @@ bool lmdbio::db::is_reader() {
 int lmdbio::db::read_record_batch(void) 
 {
   //MPI_Barrier(local_comm);
-  if (is_reader())
+  if (is_reader()) {
     read_batch();
+    lmdb_remap_buff();
+  }
   if (dist_mode == MODE_SCATTERV)
     send_batch();
   set_records();

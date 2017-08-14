@@ -207,7 +207,9 @@ private:
   bool is_reader();
   void set_records();
   void lmdb_touch_pages();
-  void lmdb_direct_io();
+  void lmdb_direct_io(int start_pg, int read_pages);
+  void lmdb_load_meta();
+  void lmdb_remap_buff();
 
 #ifdef BENCHMARK
   double mpi_time;
