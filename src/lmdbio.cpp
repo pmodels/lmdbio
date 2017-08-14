@@ -17,6 +17,8 @@ using std::cout;
 using std::endl;
 static int tmp = 0;
 static uint64_t num_page_faults = 0;
+char* lmdb_me_map;
+char* lmdb_me_fmap;
 
 #define GET_PAGE(x) ((char *) (((unsigned long long) (x)) & ~(PAGE_SIZE - 1)))
 
@@ -34,6 +36,36 @@ int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
         mprotect(GET_PAGE(__sig->si_addr), getpagesize(), PROT_READ | PROT_EXEC);
 
     return 0;
+}
+
+int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
+{
+  char* fault_addr = GET_PAGE(__sig->si_addr);
+  //printf("lmdbio: FAULT at %p -------\n", fault_addr);
+  unsigned long long offset = (unsigned long long) (fault_addr - lmdb_me_map);
+  mprotect(fault_addr, getpagesize(), PROT_READ | PROT_WRITE);
+  memcpy(fault_addr, lmdb_me_fmap + offset, getpagesize());
+  return 0;
+}
+
+void lmdbio::db::lmdb_direct_io() {
+  MPI_Status status;
+  unsigned long long offset = start_pg * getpagesize();
+  unsigned long long bytes = read_pages * getpagesize();
+  char* buff = lmdb_buffer + offset;
+  int count = 0, rc, len = 0;
+  char err[MPI_MAX_ERROR_STRING + 1];
+
+  //printf("lmdbio: DIRECT IO from addr %p for %llu bytes, offset %llu -------\n",
+  //    buff, bytes, offset);
+  mprotect(buff, bytes, PROT_READ | PROT_WRITE);
+  rc = MPI_File_read_at_all(fh, offset, buff, bytes, MPI_BYTE,
+      &status);
+  if (rc) {
+    MPI_Error_string(rc, err, &len);
+    printf("lmdbio: MPI file read error %s\n", err);
+  }
+  assert(rc == 0);
 }
 
 void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size)
@@ -141,7 +173,6 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   /* broadcast a size of data to allocate the shared buffer */
   MPI_Bcast(&size, 1, MPI_INT, 0, MPI_COMM_WORLD);
   
-
   this->win_size = subbatch_size * size * 2;
 
   /* allocate neccessary buffer */
@@ -195,7 +226,7 @@ void lmdbio::db::open_db(const char* fname) {
       sigaction(SIGSEGV, &__sig, 0);
   }
 
-#ifdef ICPADS
+#if defined(ICPADS) || defined(DIRECTIO)
   /* random an address and fix mmap's address */
   for (int i = 0; i < max_try; i++) {
     if (global_rank == 0) {
@@ -235,7 +266,32 @@ void lmdbio::db::open_db(const char* fname) {
   strtok(addr_str, "=");
   addr = atoll(strtok(NULL, "="));
   lmdb_buffer = (char*) addr;
+  lmdb_me_map = lmdb_buffer;
+#ifdef DIRECTIO
+  cout << "lmdbio: DIRECT IO mode" << endl;
 
+  /* set sigaction handler */
+  __sig.sa_sigaction = (void (*) (int, siginfo_t *, void *))
+    lmdb_fault_handler;
+  __sig.sa_flags = SA_SIGINFO;
+  sigaction(SIGSEGV, &__sig, 0);
+
+  /* protect the main buffer */
+  mprotect(lmdb_buffer, (size_t) mdb_get_mapsize(mdb_env_), PROT_NONE);
+  lmdb_me_fmap = mdb_get_fmap(mdb_env_);
+
+  /* open a file to perform direct I/O */
+  char filename[1000];
+  snprintf(filename, 1000, "%s/data.mdb", fname);
+  MPI_File_open(reader_comm, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &fh);
+
+  /* load meta pages (first 2 pages) */
+  unsigned int lmdb_pgsize = mdb_get_db_pgsize(mdb_env_);
+  start_pg = 0;
+  read_pages = 2;
+  lmdb_direct_io();
+  mdb_set_meta(mdb_env_);
+#endif
 #else
   rc = mdb_env_open(mdb_env_, fname, flags, 0664);
   //cout << "reader " << reader_id << " error code " << rc << endl;
@@ -264,12 +320,12 @@ void lmdbio::db::open_db(const char* fname) {
   printf("setting start page to %d\n", start_pg);
   fflush(stdout);
 
-  /* protect the buffer against read accesses */
-  mdb_env_info(mdb_env_, &stat);
-
   if (e && !strcmp(e, "1")) {
-      printf("protecting buffer %p\n", lmdb_buffer);
-      mprotect(lmdb_buffer, (size_t) stat.me_mapsize, PROT_NONE);
+    /* protect the buffer against read accesses */
+    mdb_env_info(mdb_env_, &stat);
+
+    printf("protecting buffer %p\n", lmdb_buffer);
+    mprotect(lmdb_buffer, (size_t) stat.me_mapsize, PROT_NONE);
   }
 }
 
@@ -294,7 +350,10 @@ void lmdbio::db::read_batch() {
   //cout << "touching pages\n";
   lmdb_touch_pages();
   //cout << "done touching pages\n";
-
+#elif DIRECTIO
+  lmdb_direct_io();
+#endif
+#if defined(ICPADS) || defined(DIRECTIO)
   if (reader_id != 0) {
     MPI_Recv(&cursor_buffer_size, 1, MPI_INT, reader_id - 1, 0, reader_comm, 
         MPI_STATUS_IGNORE);
@@ -321,7 +380,6 @@ void lmdbio::db::read_batch() {
     free(start_cursor_buffer);
   }
 #endif
-
   /* compute size of send buffer and get pointers */
   count = 0;
   total_byte_size = 0;

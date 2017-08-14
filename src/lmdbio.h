@@ -158,6 +158,7 @@ private:
   MPI_Comm reader_comm;
   MPI_Win batch_win;
   MPI_Win size_win;
+  MPI_File fh;
   record *records;
   int global_rank;
   int global_np;
@@ -206,6 +207,7 @@ private:
   bool is_reader();
   void set_records();
   void lmdb_touch_pages();
+  void lmdb_direct_io();
 
 #ifdef BENCHMARK
   double mpi_time;
@@ -292,7 +294,7 @@ private:
   void lmdb_init_cursor() {
     int offset = 0;
     lmdb_seek_to_first();
-#ifndef ICPADS
+#if !defined(ICPADS) || !defined(DIRECTIO)
     /* shift the cursor */
     lmdb_seek_multiple(reader_id * fetch_size);
 #endif
