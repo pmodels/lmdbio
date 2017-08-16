@@ -42,7 +42,7 @@ int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 {
   char* fault_addr = GET_PAGE(__sig->si_addr);
   //printf("lmdbio: FAULT at %p -------\n", fault_addr);
-  unsigned long long offset = (unsigned long long) (fault_addr - lmdb_me_map);
+  size_t offset = (size_t) (fault_addr - lmdb_me_map);
   mprotect(fault_addr, getpagesize(), PROT_READ | PROT_WRITE);
   memcpy(fault_addr, lmdb_me_fmap + offset, getpagesize());
   return 0;
@@ -50,13 +50,15 @@ int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 
 void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
   MPI_Status status;
-  unsigned long long offset = start_pg * getpagesize();
-  unsigned long long bytes = read_pages * getpagesize();
+  size_t offset = (size_t) start_pg * getpagesize();
+  size_t bytes = (size_t) read_pages * getpagesize();
   char* buff = lmdb_buffer + offset;
   int count = 0, rc, len = 0;
   char err[MPI_MAX_ERROR_STRING + 1];
 
-  //printf("lmdbio: DIRECT IO from addr %p for %llu bytes, offset %llu -------\n",
+  //printf("size of size_t %d, start pg %d, read pages %d\n", sizeof(size_t), 
+  //    start_pg, read_pages);
+  //printf("lmdbio: DIRECT IO from addr %p for %zd bytes, offset %zd -------\n",
   //    buff, bytes, offset);
   mprotect(buff, bytes, PROT_READ | PROT_WRITE);
   rc = MPI_File_read_at_all(fh, offset, buff, bytes, MPI_BYTE,
@@ -255,6 +257,7 @@ void lmdbio::db::lmdb_load_meta() {
 
 void lmdbio::db::lmdb_remap_buff() {
   //printf("lmdbio: remap buff\n");
+  //printf("lmdbio: LMDBIO %p\n", lmdb_buffer);
   mdb_unmap_vdb(mdb_env_);
   assert(mdb_create_map_vdb(mdb_env_) == 0);
   mprotect(lmdb_buffer, (size_t) mdb_get_mapsize(mdb_env_), PROT_NONE);
@@ -675,8 +678,6 @@ bool lmdbio::db::is_reader() {
 int lmdbio::db::read_record_batch(void) 
 {
   if (is_reader()) {
-  //MPI_Barrier(get_io_comm());
-  if (is_reader())
     read_batch();
     lmdb_remap_buff();
   }
