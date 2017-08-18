@@ -99,6 +99,28 @@ private:
   double stime;
   double sltime;
 };
+
+struct init_time_t {
+  double init_var_time;
+  double init_db_time;
+  double open_db_time;
+};
+
+struct iter_time_t {
+  double mpi_time;
+  double set_record_time;
+  double remap_time;
+  double mkstemp_time;
+  double unlink_time;
+  double seek_time;
+  double write_time;
+  double mmap_time;
+  double close_time;
+  double unmap_time;
+  double load_meta_time;
+  double mprotect_time;
+};
+
 #endif
 
 class db
@@ -139,16 +161,12 @@ public:
   record* get_record(int i);
 
 #ifdef BENCHMARK
-  double get_mpi_time();
-  double get_set_record_time();
-  double get_init_var_time();
-  double get_init_db_time();
-  double get_init_db_1_time();
-  double get_init_db_barrier_1_time();
-  double get_open_db_time();
-  double get_init_db_barrier_2_time();
-  double get_init_db_2_time();
+  int iter;
+  int remap_iter;
+  size_t bytes_read;
 
+  init_time_t get_init_time();
+  iter_time_t get_iter_time();
   io_stat get_read_stat();
   io_stat get_parse_stat();
 #endif
@@ -221,15 +239,8 @@ private:
   int get_io_np();
 
 #ifdef BENCHMARK
-  double mpi_time;
-  double set_record_time;
-  double init_var_time;
-  double init_db_time;
-  double init_db_1_time;
-  double init_db_barrier_1_time;
-  double open_db_time;
-  double init_db_barrier_2_time;
-  double init_db_2_time;
+  init_time_t init_time;
+  iter_time_t iter_time;
   io_stat read_stat;
   io_stat parse_stat;
 
