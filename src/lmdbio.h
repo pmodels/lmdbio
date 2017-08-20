@@ -217,6 +217,7 @@ private:
   int dist_mode;
   int read_mode;
   char* lmdb_buffer;
+  char* meta_buffer;
   int read_pages;
   int min_read_pages, max_read_pages;
   int start_pg;

@@ -21,6 +21,7 @@ char* lmdb_me_map;
 char* lmdb_me_fmap;
 
 #define GET_PAGE(x) ((char *) (((unsigned long long) (x)) & ~(PAGE_SIZE - 1)))
+#define META_PAGE_NUM (2)
 
 int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 {
@@ -259,7 +260,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 }
 
 void lmdbio::db::lmdb_load_meta() {
-  lmdb_direct_io(0, 2);
+  memcpy(lmdb_buffer, meta_buffer, META_PAGE_NUM);
   mdb_set_meta(mdb_env_);
 }
 
@@ -386,7 +387,10 @@ void lmdbio::db::open_db(const char* fname) {
   MPI_File_open(reader_comm, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &fh);
 
   /* load meta pages (first 2 pages) */
-  lmdb_load_meta();
+  meta_buffer = (char*) malloc(META_PAGE_NUM * sizeof(char));
+  lmdb_direct_io(0, META_PAGE_NUM);
+  memcpy(meta_buffer, lmdb_buffer, META_PAGE_NUM);
+  mdb_set_meta(mdb_env_);
 #endif
 #else
   rc = mdb_env_open(mdb_env_, fname, flags, 0664);
