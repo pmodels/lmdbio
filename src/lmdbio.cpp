@@ -552,20 +552,20 @@ void lmdbio::db::read_batch() {
   /* determine if the data is larger than a buffer */
   assert(total_byte_size <= win_size * get_io_np());
 
-#ifdef ICPADS
+#if defined(ICPADS) || defined(DIRECTIO)
   /* move a cursor to the next location */
   if (read_mode == MODE_STRIDE) {
-    if (reader_id == readers - 1) {
+    if (reader_id == reader_size - 1) {
       mdb_serialize_cursor(mdb_cursor, &end_cursor_buffer, &cursor_buffer_size);
       MPI_Send(&cursor_buffer_size, 1, MPI_INT, 0, 0, reader_comm);
       MPI_Send(end_cursor_buffer, cursor_buffer_size, MPI_BYTE, 0, 0, reader_comm);
       free(end_cursor_buffer);
     }
     else if (reader_id == 0) {
-      MPI_Recv(&cursor_buffer_size, 1, MPI_INT, readers - 1, 0, reader_comm, 
+      MPI_Recv(&cursor_buffer_size, 1, MPI_INT, reader_size - 1, 0, reader_comm, 
           MPI_STATUS_IGNORE);
       start_cursor_buffer = malloc(cursor_buffer_size);
-      MPI_Recv(start_cursor_buffer, cursor_buffer_size, MPI_BYTE, readers - 1, 0, 
+      MPI_Recv(start_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_size - 1, 0, 
           reader_comm, MPI_STATUS_IGNORE);
       mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
       free(start_cursor_buffer);
