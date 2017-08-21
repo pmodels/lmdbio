@@ -3,7 +3,7 @@
 
 #define BATCH_SIZE (4096)
 #define MAX_ITER (100)
-#define READER_SIZE (2)
+#define READER_SIZE (1)
 
 int main()
 {

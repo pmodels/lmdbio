@@ -104,6 +104,7 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   iter_time.cursor_free_time = 0.0;
   iter_time.cursor_restoring_time = 0.0;
   iter_time.cursor_storing_time = 0.0;
+  iter_time.barrier_time = 0.0;
   start = MPI_Wtime();
 #endif
 
@@ -852,6 +853,15 @@ int lmdbio::db::read_record_batch(void)
   if (dist_mode == MODE_SCATTERV)
     send_batch();
   set_records();
+
+#ifdef BENCHMARK
+  double start;
+  start = MPI_Wtime();
+#endif
+  MPI_Barrier(MPI_COMM_WORLD);
+#ifdef BENCHMARK
+  iter_time.barrier_time += get_elapsed_time(start, MPI_Wtime());
+#endif
   return 0;
 }
 

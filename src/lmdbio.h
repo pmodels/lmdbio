@@ -134,6 +134,7 @@ struct iter_time_t {
   double unmap_time;
   double load_meta_time;
   double mprotect_time;
+  double barrier_time;
 };
 
 #endif
