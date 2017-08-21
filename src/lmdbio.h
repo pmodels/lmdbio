@@ -108,6 +108,21 @@ struct init_time_t {
 
 struct iter_time_t {
   double mpi_time;
+  double prefetch_time;
+  double mdb_seek_time;
+  double access_time;
+  double compute_offset_time;
+  double cursor_get_current_time;
+  double cursor_sz_recv_time;
+  double cursor_sz_send_time;
+  double cursor_recv_time;
+  double cursor_send_time;
+  double cursor_dsrl_time;
+  double cursor_srl_time;
+  double cursor_malloc_time;
+  double cursor_free_time;
+  double cursor_restoring_time;
+  double cursor_storing_time;
   double set_record_time;
   double remap_time;
   double mkstemp_time;
@@ -161,7 +176,7 @@ public:
   record* get_record(int i);
 
 #ifdef BENCHMARK
-  int iter;
+  //int iter;
   int remap_iter;
   size_t bytes_read;
 
