@@ -19,7 +19,6 @@ static int tmp = 0;
 static uint64_t num_page_faults = 0;
 char* lmdb_me_map;
 char* lmdb_me_fmap;
-static int iter = 0;
 
 #define GET_PAGE(x) ((char *) (((unsigned long long) (x)) & ~(PAGE_SIZE - 1)))
 #define META_PAGE_NUM (2)
@@ -43,7 +42,7 @@ int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 {
   char* fault_addr = GET_PAGE(__sig->si_addr);
-  //printf("lmdbio: iter %d FAULT at %p, for 4096 -------\n", iter, fault_addr);
+  //printf("lmdbio: FAULT at %p, for 4096 -------\n", fault_addr);
   size_t offset = (size_t) (fault_addr - lmdb_me_map);
   mprotect(fault_addr, getpagesize(), PROT_READ | PROT_WRITE);
   memcpy(fault_addr, lmdb_me_fmap + offset, getpagesize());
@@ -58,7 +57,7 @@ void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
   int count = 0, rc, len = 0;
   char err[MPI_MAX_ERROR_STRING + 1];
 
-  //printf("lmdbio: iter %d DIRECTIO from addr %p for %zd bytes, offset %zd, start pg %d, read pages %d -------\n", iter, buff, bytes, offset, start_pg, read_pages);
+  //printf("lmdbio: DIRECTIO from addr %p for %zd bytes, offset %zd, start pg %d, read pages %d -------\n", buff, bytes, offset, start_pg, read_pages);
   mprotect(buff, bytes, PROT_READ | PROT_WRITE);
   rc = MPI_File_read_at_all(fh, offset, buff, bytes, MPI_BYTE,
       &status);
@@ -136,11 +135,7 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   this->local_reader_size = 0;
 
   assign_readers(fname, batch_size);
-  iter = 0;
-  char *e = getenv("REMAP_ITER");
-  remap_iter = e ? atoi(e) : 1;
   bytes_read = 0;
-  cout << "lmdbio: remap iter " << remap_iter << endl;
 
 #ifdef BENCHMARK
   end = MPI_Wtime();
@@ -844,11 +839,8 @@ bool lmdbio::db::is_reader() {
 int lmdbio::db::read_record_batch(void) 
 {
   if (is_reader()) {
-    //if (reader_id == 0)
-      //printf("iter %d\n", iter);
     read_batch();
-    if (++iter % remap_iter == 0)
-      lmdb_remap_buff();
+    lmdb_remap_buff();
   }
   if (dist_mode == MODE_SCATTERV)
     send_batch();
