@@ -394,10 +394,18 @@ void lmdbio::db::open_db(const char* fname) {
   mprotect(lmdb_buffer, (size_t) mdb_get_mapsize(mdb_env_), PROT_NONE);
   lmdb_me_fmap = mdb_get_fmap(mdb_env_);
 
-  /* open a file to perform direct I/O */
   char filename[1000];
   snprintf(filename, 1000, "%s/data.mdb", fname);
-  MPI_File_open(reader_comm, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &fh);
+
+  /* set ROMIO hints */
+  MPI_Info info;
+  MPI_Info_create(&info);
+  MPI_Info_set(info, "romio_cb_write", "disable");
+  MPI_Info_set(info, "romio_cb_read", "enable");
+
+  /* open a file to perform direct I/O */
+  MPI_File_open(reader_comm, filename, MPI_MODE_RDONLY, info, &fh);
+  MPI_Info_free(&info);
 
   /* load meta pages (first 2 pages) */
   meta_buffer = (char*) malloc(META_PAGE_NUM * sizeof(char));
