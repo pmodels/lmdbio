@@ -1,9 +1,10 @@
 #include <iostream>
 #include "lmdbio.h"
 
-#define BATCH_SIZE (4096)
-#define MAX_ITER (100)
-#define READER_SIZE (1)
+#define BATCH_SIZE (10)
+#define MAX_ITER (10)
+#define READER_SIZE (2)
+#define PREFETCH_SIZE (4)
 
 int main()
 {
@@ -14,7 +15,7 @@ int main()
 
     lmdbio::db *db = new lmdbio::db();
     db->set_mode(MODE_SHMEM, MODE_STRIDE);
-    db->init(MPI_COMM_WORLD, filename, BATCH_SIZE, READER_SIZE);
+    db->init(MPI_COMM_WORLD, filename, BATCH_SIZE, READER_SIZE, PREFETCH_SIZE);
 
     //std::cout << "batch size: " << db->get_batch_size() << std::endl;
 
