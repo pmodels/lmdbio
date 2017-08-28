@@ -150,7 +150,7 @@ public:
   }
 
   void init(MPI_Comm parent_comm, const char *fname, int batch_size,
-      int reader_size = 0);
+      int reader_size = 0, int prefetch = 1);
   void set_mode(int dist_mode, int read_mode);
 
   ~db() {
@@ -177,7 +177,6 @@ public:
   record* get_record(int i);
 
 #ifdef BENCHMARK
-  //int iter;
   int remap_iter;
   size_t bytes_read;
 
@@ -239,6 +238,9 @@ private:
   int start_pg;
   int num_missed_pages;
   int num_extra_pages;
+  int iter;
+  int prefetch;
+  int prefetch_count;
 
   void assign_readers(const char* fname, int batch_size);
   void open_db(const char* fname);
