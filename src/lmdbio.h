@@ -150,7 +150,7 @@ public:
   }
 
   void init(MPI_Comm parent_comm, const char *fname, int batch_size,
-      int reader_size = 0, int prefetch = 1);
+      int reader_size = 0, int prefetch = 0);
   void set_mode(int dist_mode, int read_mode);
 
   ~db() {

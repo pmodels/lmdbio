@@ -12,6 +12,7 @@
 #include <new>
 #include <sys/mman.h>
 #include <signal.h>
+#include <math.h>
 
 using std::cout;
 using std::endl;
@@ -22,6 +23,7 @@ char* lmdb_me_fmap;
 
 #define GET_PAGE(x) ((char *) (((unsigned long long) (x)) & ~(PAGE_SIZE - 1)))
 #define META_PAGE_NUM (2)
+#define OPT_READ_CHUNK (2097152)
 
 int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 {
@@ -136,9 +138,7 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
 
   this->local_reader_size = 0;
   this->prefetch = prefetch;
-  cout << "Prefetch is set to " << this->prefetch << endl;
-  assert(this->prefetch);
-
+  
   assign_readers(fname, batch_size);
   bytes_read = 0;
 
@@ -214,10 +214,6 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
     cout << "Number of readers " << reader_size << endl;
     cout << "Rank " << global_rank << " is a reader id " << reader_id << 
       " on host " << hostname << endl;
-
-    /* calculate fetch size */
-    fetch_size = (batch_size * prefetch) / reader_size;
-    assert(fetch_size);
   }
 
   MPI_Barrier(MPI_COMM_WORLD);
@@ -246,14 +242,25 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 
   /* broadcast a size of data to allocate the shared buffer */
   MPI_Bcast(&size, 1, MPI_INT, 0, MPI_COMM_WORLD);
- 
+
+  /* calculate prefetch size */
+  prefetch = prefetch ? prefetch : 
+    ceil((float) OPT_READ_CHUNK / (batch_size * size / reader_size));
+  cout << "Computed prefetch is " << this->prefetch << endl;
+  assert(this->prefetch);
+
   /* calculate win size - 2x larger than the estimated size */
   this->win_size = subbatch_size * prefetch * size * 2 * sizeof(char);
 
   /* allocate neccessary buffer */
   //cout << "FETCH SIZE " << fetch_size << endl;
-  if (is_reader(local_rank))
+  if (is_reader(local_rank)) {
+    /* calculate fetch size */
+    fetch_size = (batch_size * prefetch) / reader_size;
+    assert(fetch_size);
+
     batch_ptrs = new char*[fetch_size];
+  }
   if (dist_mode == MODE_SCATTERV) {
     if (is_reader(local_rank)) {
       int io_np = get_io_np();
