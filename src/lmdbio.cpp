@@ -148,6 +148,38 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
 #endif
 }
 
+void lmdbio::db::init_read_params(int sample_size) {
+  /* round sample size to a page unit */
+  sample_size = (sample_size & (~(PAGE_SIZE - 1)))
+    + (PAGE_SIZE * !!(sample_size % PAGE_SIZE));
+  num_read_pages = (sample_size * fetch_size) / PAGE_SIZE;
+
+
+  /* calculate prefetch size */
+  prefetch = prefetch ? prefetch :
+    ceil((float) OPT_READ_CHUNK / (num_read_pages * getpagesize()));
+  assert(this->prefetch);
+  cout << "Prefetch: " << this->prefetch << endl;
+
+  /* recalculate number of pages to read and fetch size */
+  if (is_reader(local_rank)) {
+    num_read_pages *= prefetch;
+    fetch_size *= prefetch;
+    cout << "Fetch size: " << fetch_size << endl;
+
+    max_read_pages = min_read_pages = read_pages = num_read_pages;
+    printf("LMDB buffer address %p\n", lmdb_buffer);
+
+    /* skip the first few pages as they are the meta pages */
+    start_pg = (reader_id * num_read_pages);
+    if (reader_id == 0)
+      start_pg += 3;
+    printf("setting start page to %d\n", start_pg);
+    fflush(stdout);
+  }
+}
+
+
 /* assign one reader per node */
 void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   int size = 0;
@@ -216,7 +248,12 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
       " on host " << hostname << endl;
   }
 
+  /* sync after openning the database */
   MPI_Barrier(MPI_COMM_WORLD);
+
+  /* calculate fetch size */
+  fetch_size = batch_size / reader_size;
+  assert(fetch_size);
 
   if (is_reader(local_rank)) {
 #ifdef BENCHMARK
@@ -243,11 +280,8 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   /* broadcast a size of data to allocate the shared buffer */
   MPI_Bcast(&size, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-  /* calculate prefetch size */
-  prefetch = prefetch ? prefetch : 
-    ceil((float) OPT_READ_CHUNK / (batch_size * size / reader_size));
-  cout << "Computed prefetch is " << this->prefetch << endl;
-  assert(this->prefetch);
+  /* init number of read pages, prefetch, and fetch size */
+  init_read_params(size);
 
   /* calculate win size - 2x larger than the estimated size */
   this->win_size = subbatch_size * prefetch * size * 2 * sizeof(char);
@@ -255,10 +289,6 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   /* allocate neccessary buffer */
   //cout << "FETCH SIZE " << fetch_size << endl;
   if (is_reader(local_rank)) {
-    /* calculate fetch size */
-    fetch_size = (batch_size * prefetch) / reader_size;
-    assert(fetch_size);
-
     batch_ptrs = new char*[fetch_size];
   }
   if (dist_mode == MODE_SCATTERV) {
@@ -441,27 +471,10 @@ void lmdbio::db::open_db(const char* fname) {
   check_lmdb(mdb_cursor_open(mdb_txn, mdb_dbi_, &mdb_cursor),
       "Opened cursor", false);
   lmdb_init_cursor();
-  sample_size = lmdb_value_size();
-  /* round sample size to a page unit */
-  sample_size = (sample_size & (~(PAGE_SIZE - 1))) 
-    + (PAGE_SIZE * !!(sample_size % PAGE_SIZE));
-  num_read_pages = (sample_size * fetch_size) / PAGE_SIZE;
-
-  max_read_pages = min_read_pages = read_pages = num_read_pages;
-  printf("LMDB buffer address %p\n", lmdb_buffer);
-
-  /* skip the first few pages as they are the meta pages */
-  start_pg = (reader_id * num_read_pages);
-  if (reader_id == 0)
-      start_pg += 3;
-  printf("setting start page to %d\n", start_pg);
-  fflush(stdout);
 
   if (e && !strcmp(e, "1")) {
     /* protect the buffer against read accesses */
     mdb_env_info(mdb_env_, &stat);
-
-    printf("protecting buffer %p\n", lmdb_buffer);
     mprotect(lmdb_buffer, (size_t) stat.me_mapsize, PROT_NONE);
   }
 }
@@ -751,6 +764,7 @@ void lmdbio::db::read_batch() {
   else if (dist_mode == MODE_SHMEM) {
     for (int i = 0; i < fetch_size; i++) {
       size = read_sizes[i];
+      //printf("lmdbio: count item %d = %d, size = %d\n", i, count, size);
       if (i % (subbatch_size * prefetch) == 0)
         count = (i / (subbatch_size * prefetch)) * win_size;
       memcpy(subbatch_bytes + count, batch_ptrs[i], size);
@@ -806,6 +820,7 @@ void lmdbio::db::send_batch() {
 /* set records */
 void lmdbio::db::set_records() {
   int count = iter % prefetch == 0 ? 0 : prefetch_count;
+  //printf("lmdbio: set record prefetch %d\n", prefetch);
   int size = 0;
 #ifdef BENCHMARK
   double start;
@@ -824,6 +839,11 @@ void lmdbio::db::set_records() {
     size = sizes[i];
     records[i].set_record(subbatch_bytes + count, size);
     count += size;
+  }
+  if (global_rank == 0) {
+    for (int i = subbatch_size; i < batch_size; i++) {
+      size = sizes[i];
+    }
   }
   prefetch_count = count;
 #ifdef BENCHMARK

@@ -244,6 +244,7 @@ private:
 
   void assign_readers(const char* fname, int batch_size);
   void open_db(const char* fname);
+  void init_read_params(int sample_size);
   void send_batch();
   void read_batch();
   void check_diff_batch();
