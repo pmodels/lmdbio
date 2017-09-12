@@ -154,12 +154,15 @@ public:
   void set_mode(int dist_mode, int read_mode);
 
   ~db() {
+    if (global_rank == 0)
+      printf("deconstructor is called\n");
+
     if (is_reader()) {
       mdb_cursor_close(mdb_cursor);
       mdb_dbi_close(mdb_env_, mdb_dbi_);
       mdb_env_close(mdb_env_);
+      mdb_unmap_vdb(mdb_env_);
     }
-   
     if (dist_mode == MODE_SHMEM) {
       MPI_Win_unlock_all(batch_win);
       MPI_Win_unlock_all(size_win);
