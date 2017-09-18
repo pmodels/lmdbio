@@ -112,25 +112,21 @@ public:
   void init(MPI_Comm parent_comm, const char *fname, int batch_size,
       int reader_size = 0);
   void set_mode(int dist_mode, int read_mode);
+  void set_auto_reader_tuning_params(int rep_iter);
 
   ~db() {
-      if (dist_mode == MODE_SHMEM) {
-          MPI_Win_unlock_all(batch_win);
-          MPI_Win_unlock_all(size_win);
-          MPI_Win_free(&batch_win);
-          MPI_Win_free(&size_win);
-      }
-    /*if (is_reader()) {
+    if (dist_mode == MODE_SHMEM) {
+      MPI_Win_unlock_all(batch_win);
+      MPI_Win_unlock_all(size_win);
+      MPI_Win_free(&batch_win);
+      MPI_Win_free(&size_win);
+    }
+    if (is_reader()) {
       mdb_cursor_close(mdb_cursor);
       mdb_dbi_close(mdb_env_, mdb_dbi_);
       mdb_env_close(mdb_env_);
     }
-   
-    if (mode == MODE_SHMEM) {
-      MPI_Win_free(&batch_win);
-      MPI_Win_free(&size_win);
-    }
-    delete[] records;*/
+    delete[] records;
     //MPI_Comm_free(&global_comm);
   }
 
@@ -188,6 +184,7 @@ private:
   int win_displ;
   bool is_large_dataset;
   bool is_single_reader_per_node;
+  bool is_auto_reader_tuning;
   MDB_cursor* cursor;
   MDB_env* mdb_env_;
   MDB_txn* mdb_txn;
@@ -198,8 +195,16 @@ private:
   int dist_mode;
   int read_mode;
   size_t mmap_addr;
+  char* fname;
+  int iter;
+  double best_read_time;
+  double avg_read_time;
+  int best_reader_size;
+  int auto_reader_tuning_rep_iter;
 
-  void assign_readers(const char* fname, int batch_size);
+  void assign_readers();
+  void auto_adjust_readers();
+  void allocate_buffers();
   void open_db(const char* fname);
   void send_batch();
   void read_batch();
@@ -292,7 +297,8 @@ private:
       mprotect((void*) mmap_addr, (size_t) stat.me_mapsize, PROT_READ);
     }
 
-    lmdb_seek(MDB_NEXT);
+    if (skip_size != 0)
+      lmdb_seek(MDB_NEXT);
   }
 
   void lmdb_next_fetch() {
@@ -308,23 +314,11 @@ private:
   }
 
   void lmdb_init_cursor() {
-    int offset = 0;
     lmdb_seek_to_first();
-    //std::cout << "Read mode " << read_mode << " MODE_STRIDE " << 
-    //  MODE_STRIDE << " MODE_CONT " << MODE_CONT <<  std::endl;
-    if (reader_id != 0) {
-      if (read_mode == MODE_STRIDE) {
-        offset = fetch_size;
-      }
-      else if (read_mode == MODE_CONT) {
-        MDB_stat stat;
-        mdb_env_stat(mdb_env_, &stat);
-        std::cout << "Number of records " << stat.ms_entries << std::endl;
-        offset = stat.ms_entries / reader_size;
-      }
-      std::cout << "Reader " << reader_id << " offset " << offset << std::endl;
-      lmdb_seek_multiple(reader_id * offset);
-    }
+    /*std::cout << "lmdbio: init cursor - reader " << reader_id <<
+      " fetch size " << fetch_size << " iter " << iter <<
+      " batch size " << batch_size << std::endl;*/
+    lmdb_seek_multiple((reader_id * fetch_size) + (iter * batch_size));
   }
 
   string key() {
