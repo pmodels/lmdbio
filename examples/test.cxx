@@ -1,9 +1,10 @@
 #include <iostream>
 #include "lmdbio.h"
 
-#define BATCH_SIZE (5)
-#define MAX_ITER (1)
-#define READER_SIZE (2)
+#define BATCH_SIZE (4096)
+#define MAX_ITER (1024)
+#define READER_SIZE (0)
+#define AUTO_READER_TUNING_REP_ITER (10)
 
 int main()
 {
@@ -15,6 +16,7 @@ int main()
     lmdbio::db *db = new lmdbio::db();
     db->set_mode(MODE_SHMEM, MODE_STRIDE);
     db->init(MPI_COMM_WORLD, filename, BATCH_SIZE, READER_SIZE);
+    db->set_auto_reader_tuning_params(AUTO_READER_TUNING_REP_ITER);
 
 
     //std::cout << "batch size: " << db->get_batch_size() << std::endl;
@@ -22,10 +24,10 @@ int main()
     int total_read_size = 0;
     int size = 0;
     for (int iter = 0; iter < MAX_ITER; iter++) {
-      std::cout << "rank " << rank << " read record batch" << std::endl;
+      //std::cout << "rank " << rank << " read record batch" << std::endl;
       db->read_record_batch();
 
-      std::cout << "rank " << rank << " num records " << iter << ": " << db->get_num_records() << std::endl;
+      //std::cout << "rank " << rank << " num records " << iter << ": " << db->get_num_records() << std::endl;
 
       for (int i = 0; i < db->get_num_records(); i++) {
 
