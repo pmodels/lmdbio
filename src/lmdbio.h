@@ -114,19 +114,19 @@ public:
   void init(MPI_Comm parent_comm, const char *fname, int batch_size,
       int reader_size = 0);
   void set_mode(int dist_mode, int read_mode);
+  void set_auto_reader_tuning_params(int rep_iter);
 
   ~db() {
-    if (is_reader()) {
-      mdb_cursor_close(mdb_cursor);
-      mdb_dbi_close(mdb_env_, mdb_dbi_);
-      mdb_env_close(mdb_env_);
-    }
-   
     if (dist_mode == MODE_SHMEM) {
       MPI_Win_unlock_all(batch_win);
       MPI_Win_unlock_all(size_win);
       MPI_Win_free(&batch_win);
       MPI_Win_free(&size_win);
+    }
+    if (is_reader()) {
+      mdb_cursor_close(mdb_cursor);
+      mdb_dbi_close(mdb_env_, mdb_dbi_);
+      mdb_env_close(mdb_env_);
     }
     delete[] records;
     //MPI_Comm_free(&global_comm);
@@ -188,6 +188,7 @@ private:
   int num_read_pages;
   bool is_large_dataset;
   bool is_single_reader_per_node;
+  bool is_auto_reader_tuning;
   MDB_cursor* cursor;
   MDB_env* mdb_env_;
   MDB_txn* mdb_txn;
@@ -198,6 +199,8 @@ private:
   int dist_mode;
   int read_mode;
   char* lmdb_buffer;
+  size_t mmap_addr;
+  bool is_new_addr;
   int read_pages;
   int min_read_pages, max_read_pages;
   int start_pg;
@@ -205,6 +208,16 @@ private:
   int num_extra_pages;
 
   void assign_readers(const char* fname, int batch_size);
+  char* fname;
+  int iter;
+  double best_read_time;
+  double avg_read_time;
+  int best_reader_size;
+  int auto_reader_tuning_rep_iter;
+
+  void assign_readers();
+  void auto_adjust_readers();
+  void allocate_buffers();
   void open_db(const char* fname);
   void send_batch();
   void read_batch();
@@ -299,12 +312,16 @@ private:
   }
 
   void lmdb_init_cursor() {
-    int offset = 0;
     lmdb_seek_to_first();
-#ifndef ICPADS
-    /* shift the cursor */
-    if (reader_id != 0)
-      lmdb_seek_multiple(reader_id * offset);
+#ifdef ICPADS
+    /*std::cout << "lmdbio: init cursor - reader " << reader_id <<
+      " fetch size " << fetch_size << " iter " << iter <<
+      " batch size " << batch_size << std::endl;*/
+    if (reader_id == 0) {
+      lmdb_seek_multiple(iter * batch_size);
+    }
+#else
+    lmdb_seek_multiple((reader_id * fetch_size) + (iter * batch_size));
 #endif
   }
 
