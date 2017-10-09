@@ -13,6 +13,7 @@
 #include <sys/mman.h>
 #include <signal.h>
 #include <math.h>
+#include <climits>
 
 using std::cout;
 using std::endl;
@@ -23,7 +24,7 @@ char* lmdb_me_fmap;
 
 #define GET_PAGE(x) ((char *) (((unsigned long long) (x)) & ~(PAGE_SIZE - 1)))
 #define META_PAGE_NUM (2)
-#define OPT_READ_CHUNK (2097152)
+#define OPT_READ_CHUNK (16777216)
 
 int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 {
@@ -54,13 +55,14 @@ int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
   MPI_Status status;
   size_t offset = (size_t) start_pg * getpagesize();
-  size_t bytes = (size_t) read_pages * getpagesize();
+  int bytes = (int) read_pages * getpagesize();
   char* buff = lmdb_buffer + offset;
   int count = 0, rc, len = 0;
   char err[MPI_MAX_ERROR_STRING + 1];
 
   //printf("lmdbio: DIRECTIO from addr %p for %zd bytes, offset %zd, start pg %d, read pages %d -------\n", buff, bytes, offset, start_pg, read_pages);
   mprotect(buff, bytes, PROT_READ | PROT_WRITE);
+  assert(bytes > 0 && bytes < INT_MAX);
   rc = MPI_File_read_at_all(fh, offset, buff, bytes, MPI_BYTE,
       &status);
   bytes_read += bytes;
@@ -159,7 +161,9 @@ void lmdbio::db::init_read_params(int sample_size) {
   prefetch = prefetch ? prefetch :
     ceil((float) OPT_READ_CHUNK / (num_read_pages * getpagesize()));
   assert(this->prefetch);
-  cout << "Prefetch: " << this->prefetch << endl;
+  cout << "Prefetch: " << this->prefetch << " OPT_READ_CHUNK " 
+    << OPT_READ_CHUNK << " num_read_pages " << num_read_pages
+    << " page size " << getpagesize() << endl;
 
   /* recalculate number of pages to read and fetch size */
   if (is_reader(local_rank)) {
@@ -451,6 +455,7 @@ void lmdbio::db::open_db(const char* fname) {
 
   /* open a file to perform direct I/O */
   MPI_File_open(reader_comm, filename, MPI_MODE_RDONLY, info, &fh);
+  //MPI_File_open(reader_comm, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &fh);
   MPI_Info_free(&info);
 
   /* load meta pages (first 2 pages) */
@@ -479,7 +484,6 @@ void lmdbio::db::open_db(const char* fname) {
   }
 }
 
-/* a function for readers */
 void lmdbio::db::read_batch() {
   int *read_sizes;
   int size = 0;
@@ -890,26 +894,27 @@ bool lmdbio::db::is_reader() {
 
 int lmdbio::db::read_record_batch(void) 
 {
-  if (iter % prefetch == 0 && is_reader()) {
-    //printf("lmdbio: read batch -- iter %d\n", iter);
-    read_batch();
-    //printf("lmdbio: remap buff -- iter %d\n", iter);
-    lmdb_remap_buff();
+  if (iter % prefetch == 0) {
+    //if(global_rank == 0)
+    //  printf("lmdbio: set records -- iter %d\n", iter);
+    if (is_reader()) {
+      read_batch();
+      lmdb_remap_buff();
+    }
+#ifdef BENCHMARK
+    double start;
+    start = MPI_Wtime();
+#endif
+    MPI_Barrier(MPI_COMM_WORLD);
+#ifdef BENCHMARK
+    iter_time.barrier_time += get_elapsed_time(start, MPI_Wtime());
+#endif
   }
   if (dist_mode == MODE_SCATTERV)
     send_batch();
   //printf("lmdbio: set records -- iter %d\n", iter);
   set_records();
   iter++;
-#ifdef BENCHMARK
-  double start;
-  start = MPI_Wtime();
-#endif
-  //printf("lmdbio: barrier\n");
-  MPI_Barrier(MPI_COMM_WORLD);
-#ifdef BENCHMARK
-  iter_time.barrier_time += get_elapsed_time(start, MPI_Wtime());
-#endif
   return 0;
 }
 
