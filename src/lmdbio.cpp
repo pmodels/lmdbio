@@ -323,7 +323,9 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 }
 
 void lmdbio::db::lmdb_load_meta() {
-  memcpy(lmdb_buffer, meta_buffer, META_PAGE_NUM);
+  size_t bytes = META_PAGE_NUM * getpagesize();
+  mprotect(lmdb_buffer, bytes, PROT_READ | PROT_WRITE);
+  memcpy(lmdb_buffer, meta_buffer, bytes);
   mdb_set_meta(mdb_env_);
 }
 
@@ -459,9 +461,9 @@ void lmdbio::db::open_db(const char* fname) {
   MPI_Info_free(&info);
 
   /* load meta pages (first 2 pages) */
-  meta_buffer = (char*) malloc(META_PAGE_NUM * sizeof(char));
+  meta_buffer = (char*) malloc(META_PAGE_NUM * sizeof(char) * getpagesize());
   lmdb_direct_io(0, META_PAGE_NUM);
-  memcpy(meta_buffer, lmdb_buffer, META_PAGE_NUM);
+  memcpy(meta_buffer, lmdb_buffer, META_PAGE_NUM * getpagesize());
   mdb_set_meta(mdb_env_);
 #endif
 #else
