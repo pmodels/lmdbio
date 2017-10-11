@@ -24,7 +24,7 @@ char* lmdb_me_fmap;
 
 #define GET_PAGE(x) ((char *) (((unsigned long long) (x)) & ~(PAGE_SIZE - 1)))
 #define META_PAGE_NUM (2)
-#define OPT_READ_CHUNK (16777216)
+#define OPT_READ_CHUNK (4194304)
 
 int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 {
