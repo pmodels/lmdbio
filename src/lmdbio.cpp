@@ -54,8 +54,8 @@ int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 
 void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
   MPI_Status status;
-  size_t offset = (size_t) start_pg * getpagesize();
-  int bytes = (int) read_pages * getpagesize();
+  MPI_Offset offset = (MPI_Offset) start_pg * (MPI_Offset) getpagesize();
+  int bytes = (int) read_pages * (int) getpagesize();
   char* buff = lmdb_buffer + offset;
   int count = 0, rc, len = 0;
   char err[MPI_MAX_ERROR_STRING + 1];
