@@ -138,6 +138,7 @@ public:
   int read_record_batch(void);
   int get_num_records(void);
   record* get_record(int i);
+  bool is_reader();
 
 #ifdef BENCHMARK
   double get_mpi_time();
@@ -198,7 +199,6 @@ private:
   void read_batch();
   void check_diff_batch();
   bool is_reader(int local_rank);
-  bool is_reader();
   void set_records();
 
 #ifdef BENCHMARK
