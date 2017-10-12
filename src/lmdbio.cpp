@@ -339,30 +339,32 @@ void lmdbio::db::read_batch() {
   lmdb_touch_pages();
   //cout << "done touching pages\n";
 
-  if (reader_id != 0) {
-    MPI_Recv(&cursor_buffer_size, 1, MPI_INT, reader_id - 1, 0, reader_comm, 
-        MPI_STATUS_IGNORE);
-    start_cursor_buffer = malloc(cursor_buffer_size);
-    MPI_Recv(start_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id - 1, 0, 
-        reader_comm, MPI_STATUS_IGNORE);
-    mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
-  }
-  else {
-    mdb_serialize_cursor(mdb_cursor, &start_cursor_buffer, &cursor_buffer_size);
-  }
+  if (reader_size > 1) {
+    if (reader_id != 0) {
+      MPI_Recv(&cursor_buffer_size, 1, MPI_INT, reader_id - 1, 0, reader_comm, 
+          MPI_STATUS_IGNORE);
+      start_cursor_buffer = malloc(cursor_buffer_size);
+      MPI_Recv(start_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id - 1, 0, 
+          reader_comm, MPI_STATUS_IGNORE);
+      mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
+    }
+    else {
+      mdb_serialize_cursor(mdb_cursor, &start_cursor_buffer, &cursor_buffer_size);
+    }
 
-  if (reader_id != reader_size - 1) {
-    /* shift the cursor */
-    lmdb_seek_multiple(fetch_size);
+    if (reader_id != reader_size - 1) {
+      /* shift the cursor */
+      lmdb_seek_multiple(fetch_size);
 
-    mdb_serialize_cursor(mdb_cursor, &end_cursor_buffer, &cursor_buffer_size);
-    MPI_Send(&cursor_buffer_size, 1, MPI_INT, reader_id + 1, 0, reader_comm);
-    MPI_Send(end_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id + 1, 0, 
-        reader_comm);
-    free(end_cursor_buffer);
-    /* restore the cursor */
-    mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
-    free(start_cursor_buffer);
+      mdb_serialize_cursor(mdb_cursor, &end_cursor_buffer, &cursor_buffer_size);
+      MPI_Send(&cursor_buffer_size, 1, MPI_INT, reader_id + 1, 0, reader_comm);
+      MPI_Send(end_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id + 1, 0, 
+          reader_comm);
+      free(end_cursor_buffer);
+      /* restore the cursor */
+      mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
+      free(start_cursor_buffer);
+    }
   }
 #endif
 
@@ -440,7 +442,7 @@ void lmdbio::db::read_batch() {
 
 #ifdef ICPADS
   /* move a cursor to the next location */
-  if (read_mode == MODE_STRIDE) {
+  if (read_mode == MODE_STRIDE && reader_size > 1) {
     if (reader_id == reader_size - 1) {
       mdb_serialize_cursor(mdb_cursor, &end_cursor_buffer, &cursor_buffer_size);
       MPI_Send(&cursor_buffer_size, 1, MPI_INT, 0, 0, reader_comm);
