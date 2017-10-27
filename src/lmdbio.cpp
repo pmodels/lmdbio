@@ -40,8 +40,6 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
     int reader_size) {
 #ifdef BENCHMARK
   double start, end;
-  this->mpi_time = 0.0;
-  this->set_record_time = 0.0;
   this->init_var_time = 0.0;
   this->init_db_time = 0.0;
   this->init_db_1_time = 0.0;
@@ -49,6 +47,24 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   this->open_db_time = 0.0;
   this->init_db_barrier_2_time = 0.0;
   this->init_db_2_time = 0.0;
+  iter_time.mpi_time = 0.0;
+  iter_time.set_record_time = 0.0;
+  iter_time.prefetch_time = 0.0;
+  iter_time.mdb_seek_time = 0.0;
+  iter_time.access_time = 0.0;
+  iter_time.compute_offset_time = 0.0;
+  iter_time.cursor_get_current_time = 0.0;
+  iter_time.cursor_sz_recv_time = 0.0;
+  iter_time.cursor_sz_send_time = 0.0;
+  iter_time.cursor_recv_time = 0.0;
+  iter_time.cursor_send_time = 0.0;
+  iter_time.cursor_dsrl_time = 0.0;
+  iter_time.cursor_srl_time = 0.0;
+  iter_time.cursor_malloc_time = 0.0;
+  iter_time.cursor_free_time = 0.0;
+  iter_time.cursor_restoring_time = 0.0;
+  iter_time.cursor_storing_time = 0.0;
+  iter_time.barrier_time = 0.0;
   start = MPI_Wtime();
 #endif
 
@@ -328,42 +344,96 @@ void lmdbio::db::read_batch() {
   void* end_cursor_buffer;
 #ifdef BENCHMARK
   struct rusage rstart, rend;
-  double ttime, utime, stime, sltime, start, end;
+  double ttime, utime, stime, sltime, start, end, start_;
 
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
 #endif
 
 #ifdef ICPADS
+#ifdef BENCHMARK
+  start_ = MPI_Wtime();
+#endif
   //cout << "touching pages\n";
   lmdb_touch_pages();
   //cout << "done touching pages\n";
+#ifdef BENCHMARK
+  iter_time.prefetch_time += get_elapsed_time(start_, MPI_Wtime());
+#endif
 
   if (reader_size > 1) {
     if (reader_id != 0) {
+#ifdef BENCHMARK
+      start_ = MPI_Wtime();
+#endif
       MPI_Recv(&cursor_buffer_size, 1, MPI_INT, reader_id - 1, 0, reader_comm, 
           MPI_STATUS_IGNORE);
+#ifdef BENCHMARK
+      iter_time.cursor_sz_recv_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       start_cursor_buffer = malloc(cursor_buffer_size);
+#ifdef BENCHMARK
+      iter_time.cursor_malloc_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       MPI_Recv(start_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id - 1, 0, 
           reader_comm, MPI_STATUS_IGNORE);
+#ifdef BENCHMARK
+      iter_time.cursor_recv_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
+#ifdef BENCHMARK
+      iter_time.cursor_dsrl_time += get_elapsed_time(start_, MPI_Wtime());
+#endif
     }
     else {
+#ifdef BENCHMARK
+      start_ = MPI_Wtime();
+#endif
       mdb_serialize_cursor(mdb_cursor, &start_cursor_buffer, &cursor_buffer_size);
+#ifdef BENCHMARK
+      iter_time.cursor_storing_time += get_elapsed_time(start_, MPI_Wtime());
+#endif
     }
-
     if (reader_id != reader_size - 1) {
       /* shift the cursor */
+#ifdef BENCHMARK
+      start_ = MPI_Wtime();
+#endif
       lmdb_seek_multiple(fetch_size);
-
+#ifdef BENCHMARK
+      iter_time.mdb_seek_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       mdb_serialize_cursor(mdb_cursor, &end_cursor_buffer, &cursor_buffer_size);
+#ifdef BENCHMARK
+      iter_time.cursor_srl_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       MPI_Send(&cursor_buffer_size, 1, MPI_INT, reader_id + 1, 0, reader_comm);
+#ifdef BENCHMARK
+      iter_time.cursor_sz_send_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       MPI_Send(end_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_id + 1, 0, 
           reader_comm);
-      free(end_cursor_buffer);
+#ifdef BENCHMARK
+      iter_time.cursor_send_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       /* restore the cursor */
       mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
+#ifdef BENCHMARK
+      iter_time.cursor_restoring_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
+      free(end_cursor_buffer);
       free(start_cursor_buffer);
+#ifdef BENCHMARK
+      iter_time.cursor_free_time += get_elapsed_time(start_, MPI_Wtime());
+#endif
     }
   }
 #endif
@@ -396,7 +466,14 @@ void lmdbio::db::read_batch() {
     size_t start, end;
     size_t fetch_start, fetch_end;
     read_sizes = this->sizes;
+#ifdef BENCHMARK
+    start_ = MPI_Wtime();
+#endif
     lmdb_get_current();
+#ifdef BENCHMARK
+    iter_time.cursor_get_current_time += get_elapsed_time(start_, MPI_Wtime());
+    start_ = MPI_Wtime();
+#endif
     for (int i = 0; i < fetch_size; i++) {
       //cout << "Reader " << reader_id << " reads item " << i << " key " << key() << endl;
       size = lmdb_value_size();
@@ -406,35 +483,28 @@ void lmdbio::db::read_batch() {
       //cout << "reader " << reader_id << ": " << key() << endl;
       lmdb_next();
     }
+#ifdef BENCHMARK
+    iter_time.access_time += get_elapsed_time(start_, MPI_Wtime());
+    start_ = MPI_Wtime();
+#endif
+    int sample_size = (read_sizes[fetch_size - 1] & (~(PAGE_SIZE - 1)))
+      + (PAGE_SIZE * !!(read_sizes[fetch_size - 1] % PAGE_SIZE));
 
-    fetch_start = (batch_ptrs[0] - lmdb_buffer) / getpagesize();
-    fetch_end = (batch_ptrs[fetch_size - 1] - lmdb_buffer) / getpagesize();
-    
-    /*printf("fetched data from page %lld to %lld\n",
-           fetch_start, fetch_end);*/
-    
-    num_missed_pages += 
-        (fetch_start < start_pg ? start_pg - fetch_start : 0) +
-        (fetch_end > start_pg + read_pages ? fetch_end - start_pg - read_pages : 0);
-    //printf("total num missed pages so far: %d\n", num_missed_pages);
-
-    num_extra_pages +=
-        (fetch_start > start_pg ? fetch_start - start_pg : 0) +
-        (fetch_end < start_pg + read_pages ? start_pg + read_pages - fetch_end : 0);
-    //printf("total num extra pages so far: %d\n", num_extra_pages);
-
-    read_pages = (batch_ptrs[fetch_size - 1] - batch_ptrs[0]) * (fetch_size + 1) /
-        (fetch_size * getpagesize());
+    read_pages = (batch_ptrs[fetch_size - 1] - batch_ptrs[0] + sample_size) 
+      / getpagesize();
     if (read_pages < min_read_pages)
-        min_read_pages = read_pages;
+      min_read_pages = read_pages;
     if (read_pages > max_read_pages)
-        max_read_pages = read_pages;
+      max_read_pages = read_pages;
 
     //printf("min read pages %d max read pages %d\n", min_read_pages, max_read_pages);
 
     start = (size_t) (batch_ptrs[0] - lmdb_buffer) / getpagesize();
     start_pg = start + (min_read_pages * reader_size);
     read_pages = max_read_pages + (max_read_pages - min_read_pages) * reader_size;
+#ifdef BENCHMARK
+    iter_time.compute_offset_time += get_elapsed_time(start_, MPI_Wtime());
+#endif
   }
 
   /* determine if the data is larger than a buffer */
@@ -444,24 +514,72 @@ void lmdbio::db::read_batch() {
   /* move a cursor to the next location */
   if (read_mode == MODE_STRIDE && reader_size > 1) {
     if (reader_id == reader_size - 1) {
+#ifdef BENCHMARK
+      start_ = MPI_Wtime();
+#endif
       mdb_serialize_cursor(mdb_cursor, &end_cursor_buffer, &cursor_buffer_size);
+#ifdef BENCHMARK
+      iter_time.cursor_srl_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       MPI_Send(&cursor_buffer_size, 1, MPI_INT, 0, 0, reader_comm);
+#ifdef BENCHMARK
+      iter_time.cursor_sz_send_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       MPI_Send(end_cursor_buffer, cursor_buffer_size, MPI_BYTE, 0, 0, reader_comm);
+#ifdef BENCHMARK
+      iter_time.cursor_send_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       free(end_cursor_buffer);
+#ifdef BENCHMARK
+      iter_time.cursor_free_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
     }
     else if (reader_id == 0) {
+#ifdef BENCHMARK
+      start_ = MPI_Wtime();
+#endif
       MPI_Recv(&cursor_buffer_size, 1, MPI_INT, reader_size - 1, 0, reader_comm, 
           MPI_STATUS_IGNORE);
+#ifdef BENCHMARK
+      iter_time.cursor_sz_recv_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       start_cursor_buffer = malloc(cursor_buffer_size);
+#ifdef BENCHMARK
+      iter_time.cursor_malloc_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       MPI_Recv(start_cursor_buffer, cursor_buffer_size, MPI_BYTE, reader_size - 1, 0, 
           reader_comm, MPI_STATUS_IGNORE);
+#ifdef BENCHMARK
+      iter_time.cursor_recv_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       mdb_deserialize_cursor(start_cursor_buffer, cursor_buffer_size, mdb_cursor);
+#ifdef BENCHMARK
+      iter_time.cursor_dsrl_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
       free(start_cursor_buffer);
+#ifdef BENCHMARK
+      iter_time.cursor_free_time += get_elapsed_time(start_, MPI_Wtime());
+      start_ = MPI_Wtime();
+#endif
     }
   }
 #else
+#ifdef BENCHMARK
+  start_ = MPI_Wtime();
+#endif
   /* shift the cursor */
-  lmdb_seek_multiple(fetch_size * (readers - 1));
+  lmdb_seek_multiple(fetch_size * (reader_size - 1));
+#ifdef BENCHMARK
+  iter_time.mdb_seek_time += get_elapsed_time(start_, MPI_Wtime());
+#endif
 #endif
 
 #ifdef BENCHMARK
@@ -536,7 +654,7 @@ void lmdbio::db::send_batch() {
 
   //cout << "scatterv batch completed" << endl;
 #ifdef BENCHMARK
-  mpi_time += get_elapsed_time(start, MPI_Wtime());
+  iter_time.mpi_time += get_elapsed_time(start, MPI_Wtime());
 #endif
 }
 
@@ -564,7 +682,7 @@ void lmdbio::db::set_records() {
   }
   int fsize = records[0].get_record_size();
 #ifdef BENCHMARK
- set_record_time += get_elapsed_time(start, MPI_Wtime());
+ iter_time.set_record_time += get_elapsed_time(start, MPI_Wtime());
 #endif
 }
 
@@ -659,14 +777,6 @@ double lmdbio::db::get_elapsed_time(double start, double end) {
   return 1e6 * (end - start);
 }
 
-double lmdbio::db::get_mpi_time() {
-  return mpi_time;
-}
-
-double lmdbio::db::get_set_record_time() {
-  return set_record_time;
-}
-
 double lmdbio::db::get_init_var_time() {
   return init_var_time;
 }
@@ -693,6 +803,10 @@ double lmdbio::db::get_init_db_barrier_2_time() {
 
 double lmdbio::db::get_init_db_2_time() {
   return init_db_2_time;
+}
+
+lmdbio::iter_time_t lmdbio::db::get_iter_time() {
+    return iter_time;
 }
 
 lmdbio::io_stat lmdbio::db::get_read_stat() {

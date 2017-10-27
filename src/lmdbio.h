@@ -99,6 +99,28 @@ private:
   double stime;
   double sltime;
 };
+
+struct iter_time_t {
+  double mpi_time;
+  double prefetch_time;
+  double mdb_seek_time;
+  double access_time;
+  double compute_offset_time;
+  double cursor_get_current_time;
+  double cursor_sz_recv_time;
+  double cursor_sz_send_time;
+  double cursor_recv_time;
+  double cursor_send_time;
+  double cursor_dsrl_time;
+  double cursor_srl_time;
+  double cursor_malloc_time;
+  double cursor_free_time;
+  double cursor_restoring_time;
+  double cursor_storing_time;
+  double set_record_time;
+  double barrier_time;
+};
+
 #endif
 
 class db
@@ -140,8 +162,6 @@ public:
   bool is_reader();
 
 #ifdef BENCHMARK
-  double get_mpi_time();
-  double get_set_record_time();
   double get_init_var_time();
   double get_init_db_time();
   double get_init_db_1_time();
@@ -150,8 +170,10 @@ public:
   double get_init_db_barrier_2_time();
   double get_init_db_2_time();
 
+  iter_time_t get_iter_time();
   io_stat get_read_stat();
   io_stat get_parse_stat();
+
 #endif
 
 private:
@@ -217,8 +239,6 @@ private:
   int get_io_np();
 
 #ifdef BENCHMARK
-  double mpi_time;
-  double set_record_time;
   double init_var_time;
   double init_db_time;
   double init_db_1_time;
@@ -228,6 +248,7 @@ private:
   double init_db_2_time;
   io_stat read_stat;
   io_stat parse_stat;
+  iter_time_t iter_time;
 
   double get_utime(rusage rstart, rusage rend);
   double get_stime(rusage rstart, rusage rend);
