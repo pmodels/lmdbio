@@ -65,6 +65,9 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   iter_time.cursor_restoring_time = 0.0;
   iter_time.cursor_storing_time = 0.0;
   iter_time.barrier_time = 0.0;
+  per_iter_time.io_time = 0.0;
+  per_iter_time.local_barrier_time = 0.0;
+  per_iter_time.start_processing_timestamp = 0.0;
   start = MPI_Wtime();
 #endif
 
@@ -344,9 +347,9 @@ void lmdbio::db::read_batch() {
   void* end_cursor_buffer;
 #ifdef BENCHMARK
   struct rusage rstart, rend;
-  double ttime, utime, stime, sltime, start, end, start_;
+  double ttime, utime, stime, sltime, start_time, end_time, start_;
 
-  start = MPI_Wtime();
+  start_time = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
 #endif
 
@@ -584,8 +587,8 @@ void lmdbio::db::read_batch() {
 
 #ifdef BENCHMARK
   getrusage(RUSAGE_SELF, &rend);
-  end = MPI_Wtime();
-  ttime = get_elapsed_time(start, end);
+  end_time = MPI_Wtime();
+  ttime = get_elapsed_time(start_time, end_time);
   utime = get_utime(rstart, rend);
   stime = get_stime(rstart, rend);
   sltime = get_sltime(ttime, utime, stime);
@@ -593,7 +596,7 @@ void lmdbio::db::read_batch() {
       get_inv_ctx_switches(rstart, rend),
       ttime, utime, stime, sltime);
 
-  start = MPI_Wtime();
+  start_time = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
 #endif
 
@@ -617,8 +620,8 @@ void lmdbio::db::read_batch() {
 
 #ifdef BENCHMARK
   getrusage(RUSAGE_SELF, &rend);
-  end = MPI_Wtime();
-  ttime = get_elapsed_time(start, end);
+  end_time = MPI_Wtime();
+  ttime = get_elapsed_time(start_time, end_time);
   utime = get_utime(rstart, rend);
   stime = get_stime(rstart, rend);
   sltime = get_sltime(ttime, utime, stime);
@@ -663,7 +666,7 @@ void lmdbio::db::set_records() {
   int count = 0;
   int size = 0;
 #ifdef BENCHMARK
-  double start;
+  double start = MPI_Wtime();
 #endif
   if (dist_mode == MODE_SHMEM) {
     MPI_Win_sync(batch_win);
@@ -673,6 +676,8 @@ void lmdbio::db::set_records() {
     MPI_Win_sync(size_win);
   }
 #ifdef BENCHMARK
+  per_iter_time.local_barrier_time = get_elapsed_time(start, MPI_Wtime());
+  per_iter_time.start_processing_timestamp = MPI_Wtime();
   start = MPI_Wtime();
 #endif
   for (int i = 0; i < subbatch_size; i++) {
@@ -725,11 +730,17 @@ bool lmdbio::db::is_reader() {
 
 int lmdbio::db::read_record_batch(void) 
 {
-  //MPI_Barrier(get_io_comm());
+#ifdef BENCHMARK
+  double start = MPI_Wtime();
+#endif
   if (is_reader())
     read_batch();
   if (dist_mode == MODE_SCATTERV)
     send_batch();
+#ifdef BENCHMARK
+    per_iter_time.io_time = get_elapsed_time(start, MPI_Wtime());
+    start = MPI_Wtime();
+#endif
   set_records();
   return 0;
 }
@@ -807,6 +818,10 @@ double lmdbio::db::get_init_db_2_time() {
 
 lmdbio::iter_time_t lmdbio::db::get_iter_time() {
     return iter_time;
+}
+
+lmdbio::per_iter_time_t lmdbio::db::get_per_iter_time() {
+    return per_iter_time;
 }
 
 lmdbio::io_stat lmdbio::db::get_read_stat() {

@@ -121,6 +121,12 @@ struct iter_time_t {
   double barrier_time;
 };
 
+struct per_iter_time_t {
+  double local_barrier_time;
+  double io_time;
+  double start_processing_timestamp;
+};
+
 #endif
 
 class db
@@ -171,6 +177,7 @@ public:
   double get_init_db_2_time();
 
   iter_time_t get_iter_time();
+  per_iter_time_t get_per_iter_time();
   io_stat get_read_stat();
   io_stat get_parse_stat();
 
@@ -249,6 +256,7 @@ private:
   io_stat read_stat;
   io_stat parse_stat;
   iter_time_t iter_time;
+  per_iter_time_t per_iter_time;
 
   double get_utime(rusage rstart, rusage rend);
   double get_stime(rusage rstart, rusage rend);
