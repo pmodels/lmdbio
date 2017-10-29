@@ -230,9 +230,11 @@ private:
   char* lmdb_buffer;
   int read_pages;
   int min_read_pages, max_read_pages;
+  int min_stride, max_stride, prev_end_pg;
   int start_pg;
   int num_missed_pages;
   int num_extra_pages;
+  int iter;
 
   void assign_readers(const char* fname, int batch_size);
   void open_db(const char* fname);

@@ -77,6 +77,10 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   global_np = 0; 
   global_rank = 0;
 
+  num_missed_pages = 0;
+  num_extra_pages = 0;
+  iter = 0;
+
   MPI_Comm_size(MPI_COMM_WORLD, &global_np);
   MPI_Comm_rank(MPI_COMM_WORLD, &global_rank);
 
@@ -311,21 +315,13 @@ void lmdbio::db::open_db(const char* fname) {
   check_lmdb(mdb_cursor_open(mdb_txn, mdb_dbi_, &mdb_cursor),
       "Opened cursor", false);
   lmdb_init_cursor();
-  sample_size = lmdb_value_size();
-  /* round sample size to a page unit */
-  sample_size = (sample_size & (~(PAGE_SIZE - 1))) 
-    + (PAGE_SIZE * !!(sample_size % PAGE_SIZE));
-  num_read_pages = (sample_size * fetch_size) / PAGE_SIZE;
-
-  max_read_pages = min_read_pages = read_pages = num_read_pages;
   printf("LMDB buffer address %p\n", lmdb_buffer);
 
   /* skip the first few pages as they are the meta pages */
-  start_pg = (reader_id * num_read_pages);
-  if (reader_id == 0)
-      start_pg += 3;
-  printf("setting start page to %d\n", start_pg);
-  fflush(stdout);
+  start_pg = -1;
+
+  //printf("setting start page to %d, stride %d\n", start_pg, max_stride);
+  //fflush(stdout);
 
   /* protect the buffer against read accesses */
   mdb_env_info(mdb_env_, &stat);
@@ -352,14 +348,15 @@ void lmdbio::db::read_batch() {
   start_time = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
 #endif
-
 #ifdef ICPADS
 #ifdef BENCHMARK
   start_ = MPI_Wtime();
 #endif
-  //cout << "touching pages\n";
-  lmdb_touch_pages();
-  //cout << "done touching pages\n";
+  /* start touching after the second iteration */
+  if (start_pg > 0) {
+    //printf("iter %d, touch pages\n", iter);
+    lmdb_touch_pages();
+  }
 #ifdef BENCHMARK
   iter_time.prefetch_time += get_elapsed_time(start_, MPI_Wtime());
 #endif
@@ -468,6 +465,8 @@ void lmdbio::db::read_batch() {
   else if (dist_mode == MODE_SHMEM) {
     size_t start, end;
     size_t fetch_start, fetch_end;
+    int stride;
+
     read_sizes = this->sizes;
 #ifdef BENCHMARK
     start_ = MPI_Wtime();
@@ -490,21 +489,50 @@ void lmdbio::db::read_batch() {
     iter_time.access_time += get_elapsed_time(start_, MPI_Wtime());
     start_ = MPI_Wtime();
 #endif
+    fetch_start = (batch_ptrs[0] - lmdb_buffer) / getpagesize();
     int sample_size = (read_sizes[fetch_size - 1] & (~(PAGE_SIZE - 1)))
       + (PAGE_SIZE * !!(read_sizes[fetch_size - 1] % PAGE_SIZE));
+    fetch_end = (batch_ptrs[fetch_size - 1] - lmdb_buffer + sample_size)
+      / getpagesize();
 
+    if (start_pg > 0) {
+      num_missed_pages +=
+        (fetch_start < start_pg ? start_pg - fetch_start : 0) +
+        (fetch_end > start_pg + read_pages ? fetch_end - start_pg - read_pages : 0);
+      //printf("iter %d, total num missed pages so far: %d\n", iter, num_missed_pages);
+      //printf("iter %d, left missed: %d, right missed %d\n", iter, (fetch_start < start_pg ? start_pg - fetch_start : 0), (fetch_end > start_pg + read_pages ? fetch_end - start_pg - read_pages : 0));
+
+      num_extra_pages +=
+        (fetch_start > start_pg ? fetch_start - start_pg : 0) +
+        (fetch_end < start_pg + read_pages ? start_pg + read_pages - fetch_end : 0);
+      //printf("iter %d, total num extra pages so far: %d\n", iter, num_extra_pages);
+      //printf("iter %d, left extra: %d, right extra %d\n", iter, (fetch_start > start_pg ? fetch_start - start_pg : 0), (fetch_end < start_pg + read_pages ? start_pg + read_pages - fetch_end : 0));
+    }
+    //printf("iter %d, missed pages %d, num extra pages %d\n", iter, num_missed_pages, num_extra_pages);
     read_pages = (batch_ptrs[fetch_size - 1] - batch_ptrs[0] + sample_size) 
       / getpagesize();
-    if (read_pages < min_read_pages)
-      min_read_pages = read_pages;
-    if (read_pages > max_read_pages)
+    /* initialize max and min in the first iteration */
+    if (start_pg == -1) {
       max_read_pages = read_pages;
+      //printf("init max read pages to %d\n", max_read_pages);
+    }
+    max_read_pages = read_pages > max_read_pages ? read_pages : max_read_pages;
 
-    //printf("min read pages %d max read pages %d\n", min_read_pages, max_read_pages);
+    stride = fetch_start - prev_end_pg;
+    /* initialize max and min in the second iteration */
+    if (start_pg == 0) {
+      max_stride = min_stride = stride;
+      //printf("init max and min strides to %d\n", max_stride);
+    }
+    min_stride = stride < min_stride ? stride : min_stride;
+    max_stride = stride > max_stride ? stride : max_stride;
+    prev_end_pg = fetch_end;
 
-    start = (size_t) (batch_ptrs[0] - lmdb_buffer) / getpagesize();
-    start_pg = start + (min_read_pages * reader_size);
-    read_pages = max_read_pages + (max_read_pages - min_read_pages) * reader_size;
+    //printf("iter %d, max read pages %d, min stride %d, max stride %d\n", iter, max_read_pages, min_stride, max_stride);
+
+    read_pages = start_pg > -1 ? max_stride - min_stride + max_read_pages : 0;
+    start_pg = start_pg > -1 ? prev_end_pg + min_stride : start_pg + 1;
+    //printf("iter %d, start pg %d, read pages %d\n", iter, start_pg, read_pages);
 #ifdef BENCHMARK
     iter_time.compute_offset_time += get_elapsed_time(start_, MPI_Wtime());
 #endif
@@ -742,6 +770,7 @@ int lmdbio::db::read_record_batch(void)
     start = MPI_Wtime();
 #endif
   set_records();
+  iter++;
   return 0;
 }
 
