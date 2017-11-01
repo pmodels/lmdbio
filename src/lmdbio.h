@@ -330,7 +330,7 @@ private:
   }
 
   void lmdb_init_cursor() {
-    int offset = 0;
+    int offset = fetch_size;
     lmdb_seek_to_first();
 #ifndef ICPADS
     /* shift the cursor */
