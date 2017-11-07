@@ -55,22 +55,34 @@ int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
   MPI_Status status;
   MPI_Offset offset = (MPI_Offset) start_pg * (MPI_Offset) getpagesize();
-  int bytes = (int) read_pages * (int) getpagesize();
+  size_t target_bytes = (size_t) read_pages * (size_t) getpagesize();
+  size_t remaining = target_bytes;
+  int bytes = target_bytes > INT_MAX ? INT_MAX : (int) target_bytes;
   char* buff = lmdb_buffer + offset;
   int count = 0, rc, len = 0;
   char err[MPI_MAX_ERROR_STRING + 1];
 
+  //printf("rank %d, lmdbio: bytes to read %d (read_pages %d x page size %d) target bytes %zd\n", reader_id, bytes, read_pages, getpagesize(), target_bytes);
+
+  assert(bytes > 0 && bytes <= INT_MAX);
   //printf("lmdbio: DIRECTIO from addr %p for %zd bytes, offset %zd, start pg %d, read pages %d -------\n", buff, bytes, offset, start_pg, read_pages);
-  mprotect(buff, bytes, PROT_READ | PROT_WRITE);
-  assert(bytes > 0 && bytes < INT_MAX);
-  rc = MPI_File_read_at_all(fh, offset, buff, bytes, MPI_BYTE,
-      &status);
-  bytes_read += bytes;
-  if (rc) {
-    MPI_Error_string(rc, err, &len);
-    printf("lmdbio: MPI file read error %s\n", err);
+  while (remaining != 0) {
+    mprotect(buff, bytes, PROT_READ | PROT_WRITE);
+    rc = MPI_File_read_at_all(fh, offset, buff, bytes, MPI_BYTE,
+        &status);
+    offset += bytes;
+    buff += bytes;
+    remaining -= bytes;
+    bytes = remaining < bytes ? remaining : bytes;
+    bytes_read += bytes;
+    if (rc) {
+      MPI_Error_string(rc, err, &len);
+      printf("lmdbio: offset %lld\n", offset);
+      printf("lmdbio: MPI file read error %s\n", err);
+    }
+    assert(rc == 0);
+    //printf("rank %d, direct I/O remaining %zd from %zd\n", reader_id, remaining, target_bytes);
   }
-  assert(rc == 0);
 }
 
 void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
