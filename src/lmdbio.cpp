@@ -86,7 +86,7 @@ void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
 }
 
 void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
-    int reader_size, int prefetch, int max_prefetch) {
+    int reader_size, int prefetch, int max_iter) {
 #ifdef BENCHMARK
   double start, end;
   init_time.init_var_time = 0.0;
@@ -137,7 +137,7 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   cout << "Global rank " << global_rank << endl;
   cout << "Global np " << global_np << endl;
 
-  this->max_prefetch = max_prefetch;
+  this->max_iter = max_iter;
   this->batch_size = batch_size;
   this->subbatch_size = batch_size / global_np;
   cout << "Subbatch size " << this->subbatch_size << endl;
@@ -182,11 +182,11 @@ void lmdbio::db::init_read_params(int sample_size) {
   prefetch = prefetch ? prefetch :
     ceil((float) OPT_READ_CHUNK / (num_read_pages * getpagesize()));
   prefetch = round_up_power_of_two(prefetch);
-  prefetch = prefetch > max_prefetch ? max_prefetch : prefetch;
+  prefetch = prefetch > max_iter ? max_iter : prefetch;
   assert(this->prefetch);
   cout << "Prefetch: " << this->prefetch << " OPT_READ_CHUNK " 
     << OPT_READ_CHUNK << " num_read_pages " << num_read_pages
-    << " page size " << getpagesize() << " max prefetch " << max_prefetch
+    << " page size " << getpagesize() << " max prefetch " << max_iter
     << endl;
 
   /* recalculate number of pages to read and fetch size */

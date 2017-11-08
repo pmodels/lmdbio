@@ -150,7 +150,7 @@ public:
   }
 
   void init(MPI_Comm parent_comm, const char *fname, int batch_size,
-      int reader_size = 0, int prefetch = 0, int max_prefetch = 1);
+      int reader_size = 0, int prefetch = 0, int max_iter = 1);
   void set_mode(int dist_mode, int read_mode);
 
   ~db() {
@@ -245,7 +245,7 @@ private:
   int iter;
   int prefetch;
   int prefetch_count;
-  int max_prefetch;
+  int max_iter;
 
   void assign_readers(const char* fname, int batch_size);
   void open_db(const char* fname);
