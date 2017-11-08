@@ -198,6 +198,8 @@ private:
   MPI_Win batch_win;
   MPI_Win size_win;
   MPI_File fh;
+  MPI_Datatype size_type;
+  MPI_Datatype batch_ptr_type;
   record *records;
   int global_rank;
   int global_np;
@@ -206,6 +208,7 @@ private:
   int reader_id;
   int sublocal_np;
   int sublocal_rank;
+  char** send_batch_ptrs;
   char** batch_ptrs;
   int* send_sizes;
   int* sizes;
@@ -260,6 +263,7 @@ private:
   void lmdb_direct_io(int start_pg, int read_pages);
   void lmdb_load_meta();
   void lmdb_remap_buff();
+  void lmdb_seq_seek();
   void lmdb_init_cursor();
   MPI_Comm get_io_comm();
   int get_io_np();
