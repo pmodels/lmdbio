@@ -319,18 +319,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   if (is_reader(local_rank)) {
     batch_ptrs = new char*[fetch_size];
   }
-  if (dist_mode == MODE_SCATTERV) {
-    if (is_reader(local_rank)) {
-      int io_np = get_io_np();
-      send_sizes = new int[fetch_size];
-      send_displs = new int[io_np];
-      send_counts = new int[io_np];
-      batch_bytes = (char*) malloc(fetch_size * size * 2 * sizeof(char));
-    }
-    sizes = new int[subbatch_size];
-    subbatch_bytes = (char*) malloc(win_size);
-  }
-  else if (dist_mode == MODE_SHMEM) {
+  if (dist_mode == MODE_SHMEM) {
     MPI_Comm io_comm = get_io_comm();
     /* allocate a shared buffer for sizes */
     MPI_Win_allocate_shared(subbatch_size * prefetch * sizeof(int), sizeof(int),
@@ -621,28 +610,7 @@ void lmdbio::db::read_batch() {
   /* compute size of send buffer and get pointers */
   count = 0;
   total_byte_size = 0;
-  if (dist_mode == MODE_SCATTERV) {
-    read_sizes = this->send_sizes;
-    for (int i = 0; i < fetch_size; i++) {
-      if (i % subbatch_size == 0) {
-        send_displs[id] = total_byte_size;
-        //cout << "send displs " << id << " " << total_byte_size;
-        total_byte_size += count;
-        if (i != 0)
-          send_counts[id - 1] = count;
-        id++;
-        count = 0;
-      }
-      this->batch_ptrs[i] = (char*) lmdb_value_data();
-      size = lmdb_value_size();
-      count += size;
-      read_sizes[i] = size;
-      lmdb_next();
-    }
-    total_byte_size += count;
-    send_counts[id - 1] = count;
-  }
-  else if (dist_mode == MODE_SHMEM) {
+  if (dist_mode == MODE_SHMEM) {
       size_t start, end;
       size_t fetch_start, fetch_end;
     read_sizes = this->sizes;
@@ -786,14 +754,7 @@ void lmdbio::db::read_batch() {
 
   //printf("lmdbio: parse batch -- fetch size %d\n", fetch_size);
   count = 0;
-  if (dist_mode == MODE_SCATTERV) {
-    for (int i = 0; i < fetch_size; i++) {
-      size = read_sizes[i];
-      memcpy(batch_bytes + count, batch_ptrs[i], size);
-      count += size;
-    }
-  }
-  else if (dist_mode == MODE_SHMEM) {
+  if (dist_mode == MODE_SHMEM) {
     for (int i = 0; i < fetch_size; i++) {
       size = read_sizes[i];
       //printf("lmdbio: count item %d = %d, size = %d\n", i, count, size);
@@ -884,9 +845,7 @@ void lmdbio::db::set_records() {
 }
 
 void lmdbio::db::set_mode(int dist_mode, int read_mode) {
-  if (dist_mode == MODE_SCATTERV)
-    cout << "Set dist mode to SCATTERV" << endl;
-  else if (dist_mode == MODE_SHMEM)
+  if (dist_mode == MODE_SHMEM)
     cout << "Set dist mode to SHMEM" << endl;
   if (read_mode == MODE_STRIDE)
     cout << "Set read mode to STRIDE" << endl;
@@ -938,9 +897,7 @@ int lmdbio::db::read_record_batch(void)
     iter_time.barrier_time += get_elapsed_time(start, MPI_Wtime());
 #endif
   }
-  if (dist_mode == MODE_SCATTERV)
-    send_batch();
-  //printf("lmdbio: set records -- iter %d\n", iter);
+  //printf("lmdbio: iter %d\n", iter);
   set_records();
   iter++;
   return 0;
