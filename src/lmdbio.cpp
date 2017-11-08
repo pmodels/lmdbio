@@ -220,24 +220,27 @@ void lmdbio::db::lmdb_init_cursor() {
 void lmdbio::db::lmdb_seq_seek() {
   MPI_Datatype size_type, batch_ptr_type;
   MPI_Datatype size_vec_type, batch_ptr_vec_type;
-  int blocklen, stride, send_buff_size, recv_buff_size, single_fetch_size;
+  int blockcount, blocklen, stride;
+  int send_buff_size, recv_buff_size, single_fetch_size;
+
+  printf("rank %d, seq seek\n");
 
   single_fetch_size = fetch_size / prefetch;
+  blockcount = max_iter / prefetch;
   blocklen = fetch_size;
   stride = blocklen * reader_size;
   recv_buff_size = single_fetch_size * max_iter;
   send_buff_size = single_fetch_size * reader_size * max_iter;
 
   /* a derived datatype for sizes */
-  MPI_Type_vector(max_iter, blocklen, stride, MPI_INT, &size_vec_type);
+  MPI_Type_vector(blockcount, blocklen, stride, MPI_INT, &size_vec_type);
   MPI_Type_commit(&size_vec_type);
   MPI_Type_create_resized(size_vec_type, 0, blocklen * sizeof(int),
       &size_type);
   MPI_Type_commit(&size_type);
 
   /* a derived datatype for batch ptrs */
-  printf("size of char* %zd\n", sizeof(char*));
-  MPI_Type_vector(max_iter, blocklen * sizeof(char*), stride * sizeof(char*),
+  MPI_Type_vector(blockcount, blocklen * sizeof(char*), stride * sizeof(char*),
       MPI_BYTE, &batch_ptr_vec_type);
   MPI_Type_commit(&batch_ptr_vec_type);
   MPI_Type_create_resized(batch_ptr_vec_type, 0, blocklen * sizeof(char*),
