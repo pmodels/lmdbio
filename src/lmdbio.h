@@ -260,6 +260,7 @@ private:
   void lmdb_direct_io(int start_pg, int read_pages);
   void lmdb_load_meta();
   void lmdb_remap_buff();
+  void lmdb_init_cursor();
   MPI_Comm get_io_comm();
   int get_io_np();
 
@@ -337,16 +338,6 @@ private:
   void* lmdb_value_data() {
     return mdb_value_.mv_data;
   }
-
-  void lmdb_init_cursor() {
-    int offset = 0;
-    lmdb_seek_to_first();
-#if !defined(ICPADS) || !defined(DIRECTIO)
-    /* shift the cursor */
-    if (reader_id != 0)
-      lmdb_seek_multiple(reader_id * fetch_size);
-#endif
-   }
 
   string key() {
     return string(static_cast<const char*>(mdb_key_.mv_data), mdb_key_.mv_size);

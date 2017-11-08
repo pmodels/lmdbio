@@ -207,6 +207,18 @@ void lmdbio::db::init_read_params(int sample_size) {
   }
 }
 
+void lmdbio::db::lmdb_init_cursor() {
+  int offset = 0;
+#ifndef DIRECTIO
+  lmdb_seek_to_first();
+#ifndef ICPADS
+  /* shift the cursor */
+  if (reader_id != 0)
+    lmdb_seek_multiple(reader_id * fetch_size);
+#endif
+#endif
+}
+
 
 /* assign one reader per node */
 void lmdbio::db::assign_readers(const char* fname, int batch_size) {
