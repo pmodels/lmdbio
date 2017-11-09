@@ -103,7 +103,19 @@ private:
 struct init_time_t {
   double init_var_time;
   double init_db_time;
-  double open_db_time;
+  double assign_readers_open_db_time;
+  double assign_readers_manage_comms_time;
+  double assign_readers_open_db_barrier_time;
+  double assign_readers_after_opening_db_barrier_time;
+  double assign_readers_create_buffs_time;
+  double assign_readers_seq_seek_time;
+  double assign_readers_adjust_ptrs_time;
+  double seq_seek_compute_params_time;
+  double seq_seek_create_datatype_time;
+  double seq_seek_seq_read_time;
+  double seq_seek_send_sizes_time;
+  double seq_seek_send_batch_ptrs_time;
+  double seq_seek_free_buffs_time;
 };
 
 struct iter_time_t {
@@ -135,6 +147,7 @@ struct iter_time_t {
   double load_meta_time;
   double mprotect_time;
   double barrier_time;
+  double local_barrier_time;
 };
 
 #endif
