@@ -154,20 +154,19 @@ public:
   void set_mode(int dist_mode, int read_mode);
 
   ~db() {
-    if (global_rank == 0)
-      printf("deconstructor is called\n");
-
-    if (is_reader()) {
+    printf("deconstructor is called\n");
+    if (global_rank == 0) {
       mdb_cursor_close(mdb_cursor);
       mdb_dbi_close(mdb_env_, mdb_dbi_);
       mdb_env_close(mdb_env_);
-      mdb_unmap_vdb(mdb_env_);
     }
     if (dist_mode == MODE_SHMEM) {
       MPI_Win_unlock_all(batch_win);
       MPI_Win_unlock_all(size_win);
+      MPI_Win_unlock_all(batch_offset_win);
       MPI_Win_free(&batch_win);
       MPI_Win_free(&size_win);
+      MPI_Win_free(&batch_offset_win);
     }
     delete[] records;
     //MPI_Comm_free(&global_comm);
@@ -197,9 +196,8 @@ private:
   MPI_Comm reader_comm;
   MPI_Win batch_win;
   MPI_Win size_win;
+  MPI_Win batch_offset_win;
   MPI_File fh;
-  MPI_Datatype size_type;
-  MPI_Datatype batch_ptr_type;
   record *records;
   int global_rank;
   int global_np;
@@ -208,8 +206,8 @@ private:
   int reader_id;
   int sublocal_np;
   int sublocal_rank;
-  char** send_batch_ptrs;
-  char** batch_ptrs;
+  MPI_Offset* send_batch_offsets;
+  MPI_Offset* batch_offsets;
   int* send_sizes;
   int* sizes;
   int total_byte_size;
