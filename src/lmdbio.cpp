@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <math.h>
 #include <climits>
+#include <fcntl.h>
 
 using std::cout;
 using std::endl;
@@ -52,6 +53,7 @@ int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
   return 0;
 }
 
+#if 0
 void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
   MPI_Status status;
   MPI_Offset offset = (MPI_Offset) start_pg * (MPI_Offset) getpagesize();
@@ -84,6 +86,7 @@ void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
     //printf("rank %d, direct I/O remaining %zd from %zd\n", reader_id, remaining, target_bytes);
   }
 }
+#endif
 
 void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
     int reader_size, int prefetch, int max_iter) {
@@ -566,6 +569,7 @@ void lmdbio::db::open_db(const char* fname) {
   char filename[1000];
   snprintf(filename, 1000, "%s/data.mdb", fname);
 
+#if 0
   /* set ROMIO hints */
   MPI_Info info;
   MPI_Info_create(&info);
@@ -605,10 +609,11 @@ void lmdbio::db::open_db(const char* fname) {
 
 void lmdbio::db::read_batch() {
   int bytes, rc, len;
-  size_t target_bytes, remaining;
+  size_t target_bytes, remaining, rs;
   char *buff, err[MPI_MAX_ERROR_STRING + 1];
   MPI_Status status;
-  MPI_Offset count_offset, start_offset, *offsets;
+  MPI_Offset count_offset, *offsets;
+  off_t start_offset;
 
 #ifdef BENCHMARK
   struct rusage rstart, rend;
@@ -617,15 +622,16 @@ void lmdbio::db::read_batch() {
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
 #endif
-
   len = 0;
   start_offset = batch_offsets[0];
   target_bytes = batch_offsets[fetch_size - 1] - start_offset
     + sizes[fetch_size - 1];
+#if 0
   remaining = target_bytes;
   bytes = target_bytes > INT_MAX ? INT_MAX : (int) target_bytes;
   buff = subbatch_bytes;
   offsets = batch_offsets;
+#endif
 
   if ((win_size * local_np) < target_bytes) {
     printf("rank %d, bytes overflow, win size %d, target bytes %zd\n",
@@ -635,10 +641,18 @@ void lmdbio::db::read_batch() {
 
   /* read data (single_fetch_size * prefetch) from pointers */
   if (dist_mode == MODE_SHMEM) {
+#if 0
     assert(bytes > 0 && bytes <= INT_MAX);
     while (remaining != 0) {
+#endif
+#if 0
       rc = MPI_File_read_at(fh, start_offset, buff, bytes, MPI_BYTE,
           &status);
+#endif
+      /* fixed target bytes */
+      rs = pread(fd, subbatch_bytes, target_bytes, start_offset);
+      assert(rs == target_bytes);
+#if 0
       start_offset += bytes;
       buff += bytes;
       remaining -= bytes;
@@ -650,6 +664,7 @@ void lmdbio::db::read_batch() {
       }
       assert(rc == 0);
     }
+#endif
 
     start_offset = batch_offsets[0];
     for (int i = 0; i < fetch_size; i++) {

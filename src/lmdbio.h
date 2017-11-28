@@ -210,7 +210,10 @@ private:
   MPI_Win batch_win;
   MPI_Win size_win;
   MPI_Win batch_offset_win;
+#if 0
   MPI_File fh;
+#endif
+  int fd;
   record *records;
   int global_rank;
   int global_np;
