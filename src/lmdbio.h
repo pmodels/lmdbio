@@ -148,6 +148,7 @@ struct iter_time_t {
   double mprotect_time;
   double barrier_time;
   double local_barrier_time;
+  double mpi_io_time;
 };
 
 #endif

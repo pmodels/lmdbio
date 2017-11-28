@@ -135,6 +135,7 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   iter_time.cursor_restoring_time = 0.0;
   iter_time.cursor_storing_time = 0.0;
   iter_time.barrier_time = 0.0;
+  iter_time.mpi_io_time = 0.0;
   start = MPI_Wtime();
 #endif
 
@@ -617,7 +618,7 @@ void lmdbio::db::read_batch() {
 
 #ifdef BENCHMARK
   struct rusage rstart, rend;
-  double ttime, utime, stime, sltime, start, end, start_;
+  double ttime, utime, stime, sltime, start, end, start_, mpi_io_time;
 
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
@@ -645,6 +646,9 @@ void lmdbio::db::read_batch() {
     assert(bytes > 0 && bytes <= INT_MAX);
     while (remaining != 0) {
 #endif
+#ifdef BENCHMARK
+      start_ = MPI_Wtime();
+#endif
 #if 0
       rc = MPI_File_read_at(fh, start_offset, buff, bytes, MPI_BYTE,
           &status);
@@ -652,6 +656,11 @@ void lmdbio::db::read_batch() {
       /* fixed target bytes */
       rs = pread(fd, subbatch_bytes, target_bytes, start_offset);
       assert(rs == target_bytes);
+#ifdef BENCHMARK
+      mpi_io_time = get_elapsed_time(start_, MPI_Wtime());
+      iter_time.mpi_io_time += mpi_io_time;
+      //printf("iter %d, read %zu bytes, time %.2f, start offset %lld, end offset %lld\n", iter, target_bytes, mpi_io_time, start_offset, batch_offsets[fetch_size - 1]);
+#endif
 #if 0
       start_offset += bytes;
       buff += bytes;
