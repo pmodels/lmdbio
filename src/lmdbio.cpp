@@ -68,7 +68,7 @@ void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
   //printf("lmdbio: DIRECTIO from addr %p for %zd bytes, offset %zd, start pg %d, read pages %d -------\n", buff, bytes, offset, start_pg, read_pages);
   while (remaining != 0) {
     mprotect(buff, bytes, PROT_READ | PROT_WRITE);
-    rc = MPI_File_read_at_all(fh, offset, buff, bytes, MPI_BYTE,
+    rc = MPI_File_read_at(fh, offset, buff, bytes, MPI_BYTE,
         &status);
     offset += bytes;
     buff += bytes;
@@ -575,6 +575,8 @@ void lmdbio::db::open_db(const char* fname) {
   /* open a file to perform direct I/O */
   MPI_File_open(reader_comm, filename, MPI_MODE_RDONLY, info, &fh);
   MPI_Info_free(&info);
+#endif
+  fd = open(filename, O_RDONLY);
 #else
   rc = mdb_env_open(mdb_env_, fname, flags, 0664);
   //cout << "reader " << reader_id << " error code " << rc << endl;
@@ -635,7 +637,7 @@ void lmdbio::db::read_batch() {
   if (dist_mode == MODE_SHMEM) {
     assert(bytes > 0 && bytes <= INT_MAX);
     while (remaining != 0) {
-      rc = MPI_File_read_at_all(fh, start_offset, buff, bytes, MPI_BYTE,
+      rc = MPI_File_read_at(fh, start_offset, buff, bytes, MPI_BYTE,
           &status);
       start_offset += bytes;
       buff += bytes;
