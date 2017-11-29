@@ -637,7 +637,6 @@ void lmdbio::db::compute_data_offsets(long start_key, long end_key,
   int counter_len = 0;
   int limit = 0;
   int commit_freenode_count = 0;
-  int txn_freenode_count = 0;
   int freelist_count = 0;
   int new_node_count = 0;
   int page_size = getpagesize();
@@ -925,6 +924,7 @@ void lmdbio::db::set_prov_info(prov_info_t prov_info) {
   data_end_page_no = data_start_page_no;
   depth = old_depth = 1;
   txnid = 1;
+  txn_freenode_count = 0;
   node_count.push_back(0);
 }
 

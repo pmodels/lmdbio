@@ -292,6 +292,7 @@ private:
   int old_depth;
   int freenode_count[2];
   int txnid;
+  int txn_freenode_count;
 
 
   void assign_readers(const char* fname, int batch_size);
