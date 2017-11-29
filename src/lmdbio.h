@@ -136,7 +136,6 @@ struct iter_time_t {
   double prefetch_time;
   double mdb_seek_time;
   double access_time;
-  double compute_offset_time;
   double cursor_get_current_time;
   double cursor_sz_recv_time;
   double cursor_sz_send_time;
@@ -162,6 +161,8 @@ struct iter_time_t {
   double barrier_time;
   double local_barrier_time;
   double mpi_io_time;
+  double compute_offset_time;
+  double adjust_offset_time;
 };
 
 #endif

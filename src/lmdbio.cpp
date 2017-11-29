@@ -122,7 +122,6 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   iter_time.seek_time = 0.0;
   iter_time.mdb_seek_time = 0.0;
   iter_time.access_time = 0.0;
-  iter_time.compute_offset_time = 0.0;
   iter_time.cursor_get_current_time = 0.0;
   iter_time.cursor_sz_recv_time = 0.0;
   iter_time.cursor_sz_send_time = 0.0;
@@ -136,6 +135,8 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   iter_time.cursor_storing_time = 0.0;
   iter_time.barrier_time = 0.0;
   iter_time.mpi_io_time = 0.0;
+  iter_time.compute_offset_time = 0.0;
+  iter_time.adjust_offset_time = 0.0;
   start = MPI_Wtime();
 #endif
 
@@ -749,6 +750,7 @@ void lmdbio::db::read_batch() {
 
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
+  start_ = MPI_Wtime();
 #endif
   len = 0;
   /* if provenance info is provided, calculate offsets on the fly;
@@ -764,6 +766,9 @@ void lmdbio::db::read_batch() {
     target_bytes = batch_offsets[fetch_size - 1] - start_offset
       + sizes[fetch_size - 1];
   }
+#ifdef BENCHMARK
+  iter_time.compute_offset_time += get_elapsed_time(start_, MPI_Wtime());
+#endif
 #if 0
   remaining = target_bytes;
   bytes = target_bytes > INT_MAX ? INT_MAX : (int) target_bytes;
@@ -796,6 +801,7 @@ void lmdbio::db::read_batch() {
 #ifdef BENCHMARK
       mpi_io_time = get_elapsed_time(start_, MPI_Wtime());
       iter_time.mpi_io_time += mpi_io_time;
+      start_ = MPI_Wtime();
       //printf("iter %d, read %zu bytes, time %.2f, start offset %lld, end offset %lld\n", iter, target_bytes, mpi_io_time, start_offset, batch_offsets[fetch_size - 1]);
 #endif
 #if 0
@@ -824,6 +830,7 @@ void lmdbio::db::read_batch() {
   //printf("lmdbio: done parsing batch\n");
 
 #ifdef BENCHMARK
+  iter_time.adjust_offset_time += get_elapsed_time(start_, MPI_Wtime());
   getrusage(RUSAGE_SELF, &rend);
   end = MPI_Wtime();
   ttime = get_elapsed_time(start, end);
