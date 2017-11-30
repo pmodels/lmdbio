@@ -661,7 +661,7 @@ void lmdbio::db::compute_data_offsets(long start_key, long end_key,
     }
 
     /* commit */
-    if (i % prov_info.commit_iter == 0 && i != 0) {
+    if (prov_info.commit_iter && i % prov_info.commit_iter == 0 && i != 0) {
       /* compute number of free nodes to commit */
       if (txnid == 1) {
         commit_freenode_count = 0;
