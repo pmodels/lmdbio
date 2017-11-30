@@ -330,7 +330,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   int is_rank_0 = 0;
   int is_reader_ = 0;
   int sublocal_id = 0;
-  int size_win_size = 0;
+  MPI_Aint size_win_size = 0;
   local_rank = 0;
   local_np = 0;
   reader_id = 0;
@@ -629,7 +629,7 @@ void lmdbio::db::open_db(const char* fname) {
 
 /* compute data offsets based on provided provenance info */
 void lmdbio::db::compute_data_offsets(long start_key, long end_key,
-    off_t *start_offset, size_t *bytes) {
+    off_t *start_offset, ssize_t *bytes) {
 
   assert(prev_key <= start_key && start_key <= end_key);
 
@@ -738,7 +738,7 @@ void lmdbio::db::compute_data_offsets(long start_key, long end_key,
 
 void lmdbio::db::read_batch() {
   int bytes, rc, len;
-  size_t target_bytes, remaining, rs;
+  ssize_t target_bytes, remaining, rs;
   char *buff, err[MPI_MAX_ERROR_STRING + 1];
   MPI_Status status;
   MPI_Offset count_offset, *offsets;
@@ -766,6 +766,10 @@ void lmdbio::db::read_batch() {
     target_bytes = batch_offsets[fetch_size - 1] - start_offset
       + sizes[fetch_size - 1];
   }
+  if (target_bytes <= 0) {
+    printf("lmdbio: invalid target bytes %zd\n", target_bytes);
+  }
+  assert(target_bytes > 0);
 #ifdef BENCHMARK
   iter_time.compute_offset_time += get_elapsed_time(start_, MPI_Wtime());
 #endif
@@ -776,11 +780,11 @@ void lmdbio::db::read_batch() {
   offsets = batch_offsets;
 #endif
 
-  if ((win_size * local_np) < target_bytes) {
-    printf("rank %d, bytes overflow, win size %d, target bytes %zd\n",
-        reader_id, win_size * local_np, target_bytes);
+  if ((ssize_t) (win_size * local_np) < target_bytes) {
+    printf("rank %d, bytes overflow, win size %zd, target bytes %zd\n",
+        reader_id, (ssize_t) win_size * local_np, target_bytes);
   }
-  assert((win_size * local_np) >= target_bytes);
+  assert((ssize_t) (win_size * local_np) >= target_bytes);
 
   /* read data (single_fetch_size * prefetch) from pointers */
   if (dist_mode == MODE_SHMEM) {

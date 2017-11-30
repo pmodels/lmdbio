@@ -255,7 +255,7 @@ private:
   int* send_counts;
   char* batch_bytes; 
   char* subbatch_bytes;
-  int win_size;
+  MPI_Aint win_size;
   int win_displ;
   int sample_size;
   int num_read_pages;
@@ -312,7 +312,7 @@ private:
   void lmdb_seq_seek();
   void lmdb_init_cursor();
   void compute_data_offsets(long start_key, long end_key,
-      off_t *start_offset, size_t *bytes);
+      off_t *start_offset, ssize_t *bytes);
   MPI_Comm get_io_comm();
   int get_io_np();
 
