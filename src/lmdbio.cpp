@@ -933,7 +933,7 @@ void lmdbio::db::set_prov_info(prov_info_t prov_info) {
   this->prov_info.commit_iter = prov_info.commit_iter;
   this->prov_info.branch_num_keys = prov_info.branch_num_keys;
   this->prov_info.leaf_num_keys = prov_info.leaf_num_keys;
-  this->prov_info.data_num_pages = prov_info.data_num_pages;
+  this->prov_info.data_num_pages = prov_info.data_num_pages - 1;
   this->prov_info.first_key = prov_info.first_key;
   this->prov_info.first_leaf_page_no = prov_info.first_leaf_page_no;
   this->prov_info.overflow = prov_info.overflow;
