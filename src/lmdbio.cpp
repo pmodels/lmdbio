@@ -741,8 +741,8 @@ void lmdbio::db::read_batch() {
   ssize_t target_bytes, remaining, rs;
   char *buff, err[MPI_MAX_ERROR_STRING + 1];
   MPI_Status status;
-  MPI_Offset count_offset, *offsets;
-  off_t start_offset;
+  MPI_Offset *offsets;
+  off_t start_offset, offset;
 
 #ifdef BENCHMARK
   struct rusage rstart, rend;
@@ -800,8 +800,19 @@ void lmdbio::db::read_batch() {
           &status);
 #endif
       /* fixed target bytes */
-      rs = pread(fd, subbatch_bytes, target_bytes, start_offset);
-      assert(rs == target_bytes);
+      buff = subbatch_bytes;
+      remaining = target_bytes;
+      offset = start_offset;
+      while (remaining) {
+        rs = pread(fd, buff, remaining, offset);
+        //printf("rank reader %d, iter %d, try to read %zd bytes, get %zd bytes\n",
+        //    reader_id, iter, remaining, rs);
+        offset += rs;
+        buff += rs;
+        remaining -= rs;
+        assert(remaining >= 0);
+      }
+      assert(remaining == 0);
 #ifdef BENCHMARK
       mpi_io_time = get_elapsed_time(start_, MPI_Wtime());
       iter_time.mpi_io_time += mpi_io_time;
