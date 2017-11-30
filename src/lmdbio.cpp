@@ -895,7 +895,7 @@ void lmdbio::db::set_records() {
   double start;
   start = MPI_Wtime();
 #endif
-  if (dist_mode == MODE_SHMEM) {
+  if (dist_mode == MODE_SHMEM && iter % prefetch == 0) {
     MPI_Win_sync(batch_win);
     if (prov_info_mode != MODE_PROV_INFO_ENABLED)
       MPI_Win_sync(size_win);
