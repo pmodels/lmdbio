@@ -756,7 +756,7 @@ void lmdbio::db::read_batch() {
   /* if provenance info is provided, calculate offsets on the fly;
    * else get offsets from the array */
   if (prov_info_mode == MODE_PROV_INFO_ENABLED) {
-    long start_key = (fetch_size * reader_size * iter)
+    long start_key = (fetch_size * reader_size * (iter / prefetch))
       + (fetch_size * reader_id);
     long end_key = start_key + fetch_size - 1; /* needed!! */
     compute_data_offsets(start_key, end_key, &start_offset, &target_bytes);
@@ -805,8 +805,7 @@ void lmdbio::db::read_batch() {
       offset = start_offset;
       while (remaining) {
         rs = pread(fd, buff, remaining, offset);
-        //printf("rank reader %d, iter %d, try to read %zd bytes, get %zd bytes\n",
-        //    reader_id, iter, remaining, rs);
+        assert(rs > 0);
         offset += rs;
         buff += rs;
         remaining -= rs;
