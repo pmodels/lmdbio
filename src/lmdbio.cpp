@@ -743,11 +743,28 @@ void lmdbio::db::read_batch() {
   MPI_Status status;
   MPI_Offset *offsets;
   off_t start_offset, offset;
-
+  int num_groups, group_no;
+  const int group_size = 16;
+  int is_done = 0;
 #ifdef BENCHMARK
   struct rusage rstart, rend;
   double ttime, utime, stime, sltime, start, end, start_, mpi_io_time;
 
+#endif
+  /* wait for the previous group to be done */
+  if (reader_size > group_size) {
+    num_groups = reader_size / group_size;
+    group_no = reader_id / group_size;
+    printf("reader %d, group size %d, num group %d, group no %d\n",
+        group_size, reader_id, num_groups, group_no);
+    if (group_no != 0) {
+      printf("reader %d, wait for %d to finish reading\n",
+          reader_id, reader_id - group_size);
+      MPI_Recv(&is_done, 1, MPI_INT, reader_id - group_size, 0,
+          reader_comm, MPI_STATUS_IGNORE);
+    }
+  }
+#ifdef BENCHMARK
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
   start_ = MPI_Wtime();
@@ -854,6 +871,18 @@ void lmdbio::db::read_batch() {
   parse_stat.add_stat(get_ctx_switches(rstart, rend), 
       get_inv_ctx_switches(rstart, rend),
       ttime, utime, stime, sltime);
+#endif
+  /* notify the next group that the read is done */
+  if (reader_size > group_size) {
+    if (group_no != num_groups - 1) {
+      is_done = 1;
+      printf("reader %d, notify %d that its read has finished reading\n",
+          reader_id, reader_id + group_size);
+      MPI_Send(&is_done, 1, MPI_INT, reader_id + group_size, 0,
+          reader_comm);
+    }
+  }
+#ifdef BENCHMARK
 #endif
 }
 
