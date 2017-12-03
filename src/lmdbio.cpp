@@ -37,16 +37,19 @@ int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
     int reader_size) {
 #ifdef BENCHMARK
-  double start, end;
-  this->mpi_time = 0.0;
-  this->set_record_time = 0.0;
-  this->init_var_time = 0.0;
-  this->init_db_time = 0.0;
-  this->init_db_1_time = 0.0;
-  this->init_db_barrier_1_time = 0.0;
-  this->open_db_time = 0.0;
-  this->init_db_barrier_2_time = 0.0;
-  this->init_db_2_time = 0.0;
+  double start;
+  init_time.init_var_time = 0.0;
+  init_time.init_db_time = 0.0;
+  init_time.assign_readers_open_db_time = 0.0;
+  init_time.assign_readers_manage_comms_time = 0.0;
+  init_time.assign_readers_open_db_barrier_time = 0.0;
+  init_time.assign_readers_after_opening_db_barrier_time = 0.0;
+  init_time.assign_readers_create_buffs_time = 0.0;
+  iter_time.mpi_time = 0.0;
+  iter_time.set_record_time = 0.0;
+  iter_time.mdb_seek_time = 0.0;
+  iter_time.access_time = 0.0;
+  iter_time.local_barrier_time = 0.0;
   start = MPI_Wtime();
 #endif
 
@@ -66,8 +69,7 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   this->subbatch_size = batch_size / global_np;
   cout << "Subbatch size " << this->subbatch_size << endl;
 #ifdef BENCHMARK
-  end = MPI_Wtime();
-  this->init_var_time = get_elapsed_time(start, end);
+  init_time.init_var_time = get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
 
@@ -80,8 +82,7 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   assign_readers(fname, batch_size);
 
 #ifdef BENCHMARK
-  end = MPI_Wtime();
-  this->init_db_time = get_elapsed_time(start, end);
+  init_time.init_db_time = get_elapsed_time(start, MPI_Wtime());
 #endif
 }
 
@@ -91,6 +92,9 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   int is_rank_0 = 0;
   int is_reader_ = 0;
   int sublocal_id = 0;
+#ifdef BENCHMARK
+  double start = MPI_Wtime();
+#endif
   local_rank = 0;
   local_np = 0;
   reader_id = 0;
@@ -154,23 +158,31 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
     fetch_size = batch_size / reader_size;
     assert(fetch_size);
   }
+#ifdef BENCHMARK
+  init_time.assign_readers_manage_comms_time = get_elapsed_time(start, MPI_Wtime());
+  start = MPI_Wtime();
+#endif
 
   MPI_Barrier(MPI_COMM_WORLD);
 
+#ifdef BENCHMARK
+  init_time.assign_readers_open_db_barrier_time = get_elapsed_time(start, MPI_Wtime());
+  start = MPI_Wtime();
+#endif
   if (is_reader(local_rank)) {
-#ifdef BENCHMARK
-    double end_db, start_db;
-    start_db = MPI_Wtime();
-#endif
-    cout << "OPEN DB" << endl;
     open_db(fname);
-#ifdef BENCHMARK
-    end_db = MPI_Wtime();
-    this->open_db_time = get_elapsed_time(start_db, end_db);
-#endif
   }
+#ifdef BENCHMARK
+  init_time.assign_readers_open_db_time = get_elapsed_time(start, MPI_Wtime());
+  start = MPI_Wtime();
+#endif
 
   MPI_Barrier(MPI_COMM_WORLD);
+
+#ifdef BENCHMARK
+  init_time.assign_readers_after_opening_db_barrier_time = get_elapsed_time(start, MPI_Wtime());
+  start = MPI_Wtime();
+#endif
 
   if (global_rank == 0) {
     /* get size */
@@ -212,6 +224,10 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 
   /* allocate record's array */
   this->records = new (std::nothrow) record[subbatch_size];
+#ifdef BENCHMARK
+  init_time.assign_readers_create_buffs_time = get_elapsed_time(start, MPI_Wtime());
+  start = MPI_Wtime();
+#endif
 }
 
 /* open the database and initialize a position of a cursor */
@@ -258,11 +274,12 @@ void lmdbio::db::read_batch() {
   int count = 0;
 #ifdef BENCHMARK
   struct rusage rstart, rend;
-  double ttime, utime, stime, sltime, start, end;
+  double ttime, utime, stime, sltime, start, end, start_;
 
   //MPI_Barrier(reader_comm);
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
+  start_ = MPI_Wtime();
 #endif
   //cout << "read batch start\n"; 
   /* compute size of send buffer and get pointers */
@@ -296,10 +313,15 @@ void lmdbio::db::read_batch() {
       batch_ptrs[i] = (char*) lmdb_value_data();
       read_sizes[i] = size;
       total_byte_size += size;
-      cout << "reader " << reader_id << ": " << key() << endl;
+      //cout << "reader " << reader_id << ": " << key() << endl;
       lmdb_next();
     }
   }
+
+#ifdef BENCHMARK
+  iter_time.access_time += get_elapsed_time(start_, MPI_Wtime());
+  start_ = MPI_Wtime();
+#endif
 
   /* determine if the data is larger than a buffer */
   assert(total_byte_size <= win_size * get_io_np());
@@ -309,6 +331,7 @@ void lmdbio::db::read_batch() {
     lmdb_next_fetch();
 
 #ifdef BENCHMARK
+  iter_time.mdb_seek_time += get_elapsed_time(start_, MPI_Wtime());
   getrusage(RUSAGE_SELF, &rend);
   end = MPI_Wtime();
   ttime = get_elapsed_time(start, end);
@@ -384,7 +407,7 @@ void lmdbio::db::send_batch() {
 
   //cout << "scatterv batch completed" << endl;
 #ifdef BENCHMARK
-  mpi_time += get_elapsed_time(start, MPI_Wtime());
+  iter_time.mpi_time += get_elapsed_time(start, MPI_Wtime());
 #endif
 }
 
@@ -393,7 +416,7 @@ void lmdbio::db::set_records() {
   int count = 0;
   int size = 0;
 #ifdef BENCHMARK
-  double start;
+  double start = MPI_Wtime();
 #endif
   //cout << "set records start\n";
   if (dist_mode == MODE_SHMEM) {
@@ -406,6 +429,7 @@ void lmdbio::db::set_records() {
     MPI_Win_sync(size_win);
   }
 #ifdef BENCHMARK
+  iter_time.local_barrier_time += get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
   for (int i = 0; i < subbatch_size; i++) {
@@ -415,9 +439,8 @@ void lmdbio::db::set_records() {
     //printf("set record %p, data %p, size %d\n", &records[i], records[i].data, size);
     count += size;
   }
-  int fsize = records[0].get_record_size();
 #ifdef BENCHMARK
- set_record_time += get_elapsed_time(start, MPI_Wtime());
+  iter_time.set_record_time += get_elapsed_time(start, MPI_Wtime());
 #endif
   //cout << "set records end\n";
 }
@@ -502,40 +525,12 @@ double lmdbio::db::get_elapsed_time(double start, double end) {
   return 1e6 * (end - start);
 }
 
-double lmdbio::db::get_mpi_time() {
-  return mpi_time;
+lmdbio::init_time_t lmdbio::db::get_init_time() {
+  return init_time;
 }
 
-double lmdbio::db::get_set_record_time() {
-  return set_record_time;
-}
-
-double lmdbio::db::get_init_var_time() {
-  return init_var_time;
-}
-
-double lmdbio::db::get_init_db_time() {
-  return init_db_time;
-}
-
-double lmdbio::db::get_init_db_1_time() {
-  return init_db_1_time;
-}
-
-double lmdbio::db::get_init_db_barrier_1_time() {
-  return init_db_barrier_1_time;
-}
-
-double lmdbio::db::get_open_db_time() {
-  return open_db_time;
-}
-
-double lmdbio::db::get_init_db_barrier_2_time() {
-  return init_db_barrier_2_time;
-}
-
-double lmdbio::db::get_init_db_2_time() {
-  return init_db_2_time;
+lmdbio::iter_time_t lmdbio::db::get_iter_time() {
+  return iter_time;
 }
 
 lmdbio::io_stat lmdbio::db::get_read_stat() {

@@ -99,6 +99,24 @@ private:
   double stime;
   double sltime;
 };
+
+struct init_time_t {
+  double init_var_time;
+  double init_db_time;
+  double assign_readers_open_db_time;
+  double assign_readers_manage_comms_time;
+  double assign_readers_open_db_barrier_time;
+  double assign_readers_after_opening_db_barrier_time;
+  double assign_readers_create_buffs_time;
+};
+
+struct iter_time_t {
+  double mpi_time;
+  double set_record_time;
+  double mdb_seek_time;
+  double access_time;
+  double local_barrier_time;
+};
 #endif
 
 class db
@@ -142,16 +160,8 @@ public:
   bool is_reader();
 
 #ifdef BENCHMARK
-  double get_mpi_time();
-  double get_set_record_time();
-  double get_init_var_time();
-  double get_init_db_time();
-  double get_init_db_1_time();
-  double get_init_db_barrier_1_time();
-  double get_open_db_time();
-  double get_init_db_barrier_2_time();
-  double get_init_db_2_time();
-
+  init_time_t get_init_time();
+  iter_time_t get_iter_time();
   io_stat get_read_stat();
   io_stat get_parse_stat();
 #endif
@@ -211,15 +221,8 @@ private:
   int get_io_np();
 
 #ifdef BENCHMARK
-  double mpi_time;
-  double set_record_time;
-  double init_var_time;
-  double init_db_time;
-  double init_db_1_time;
-  double init_db_barrier_1_time;
-  double open_db_time;
-  double init_db_barrier_2_time;
-  double init_db_2_time;
+  init_time_t init_time;
+  iter_time_t iter_time;
   io_stat read_stat;
   io_stat parse_stat;
 
