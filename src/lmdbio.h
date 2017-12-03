@@ -16,6 +16,7 @@
 #include <sys/resource.h>
 #include <vector>
 #include <string>
+#include <sys/mman.h>
 
 using std::vector;
 using std::string;
@@ -62,6 +63,8 @@ public:
     utime = 0.0;
     stime = 0.0;
     sltime = 0.0;
+    mnr_pgf = 0.0;
+    mjr_pgf = 0.0;
   }
 
   void add_stat(double ctx_switches, double inv_ctx_switches,
@@ -84,6 +87,11 @@ public:
     this->sltime = sltime;
   }
 
+  void add_pgf(double mnr_pgf, double mjr_pgf) {
+    this->mnr_pgf = mnr_pgf;
+    this->mjr_pgf = mjr_pgf;
+  }
+
   double get_ctx_switches() { return ctx_switches; }
   double get_inv_ctx_switches() { return inv_ctx_switches; }
   double get_ttime() { return ttime; }
@@ -98,12 +106,25 @@ private:
   double utime;
   double stime;
   double sltime;
+  double mnr_pgf;
+  double mjr_pgf;
+};
+
+struct init_time_t {
+  double total_init_time;
+  double assign_readers_time;
+  double manage_comms_time;
+  double barrier_open_db_time;
+  double barrier_after_open_db_time;
+  double create_buffers_time;
+  double open_db_time;
 };
 
 struct iter_time_t {
   double mpi_time;
   double prefetch_time;
   double mdb_seek_time;
+  double mdb_hpcc_seek_time;
   double access_time;
   double compute_offset_time;
   double cursor_get_current_time;
@@ -119,6 +140,21 @@ struct iter_time_t {
   double cursor_storing_time;
   double set_record_time;
   double barrier_time;
+  double io_barrier_time;
+  double io_prefetch_barrier_time;
+  double io_memcpy_barrier_time;
+  double serialization_time;
+  double cpy_get_size_time;
+  double cpy_get_count_time;
+  double cpy_memcpy_time;
+  double cpy_update_count_time;
+  double cpy_access_time;
+  double cpy_ptrs_mnr_pgf;
+  double cpy_ptrs_mjr_pgf;
+  double seek_mnr_pgf;
+  double seek_mjr_pgf;
+  double memcpy_mnr_pgf;
+  double memcpy_mjr_pgf;
 };
 
 struct per_iter_time_t {
@@ -168,19 +204,11 @@ public:
   bool is_reader();
 
 #ifdef BENCHMARK
-  double get_init_var_time();
-  double get_init_db_time();
-  double get_init_db_1_time();
-  double get_init_db_barrier_1_time();
-  double get_open_db_time();
-  double get_init_db_barrier_2_time();
-  double get_init_db_2_time();
-
   iter_time_t get_iter_time();
+  init_time_t get_init_time();
   per_iter_time_t get_per_iter_time();
   io_stat get_read_stat();
   io_stat get_parse_stat();
-
 #endif
 
 private:
@@ -227,14 +255,13 @@ private:
   int valid_;
   int dist_mode;
   int read_mode;
-  char* lmdb_buffer;
   int read_pages;
   int min_read_pages, max_read_pages;
   int min_stride, max_stride, prev_end_pg;
   int start_pg;
   int num_missed_pages;
   int num_extra_pages;
-  int iter;
+  int num_seeked_pages;
 
   void assign_readers(const char* fname, int batch_size);
   void open_db(const char* fname);
@@ -248,15 +275,9 @@ private:
   int get_io_np();
 
 #ifdef BENCHMARK
-  double init_var_time;
-  double init_db_time;
-  double init_db_1_time;
-  double init_db_barrier_1_time;
-  double open_db_time;
-  double init_db_barrier_2_time;
-  double init_db_2_time;
   io_stat read_stat;
   io_stat parse_stat;
+  init_time_t init_time;
   iter_time_t iter_time;
   per_iter_time_t per_iter_time;
 
@@ -266,6 +287,8 @@ private:
   double get_ctx_switches(rusage rstart, rusage rend);
   double get_inv_ctx_switches(rusage rstart, rusage rend);
   double get_elapsed_time(double start, double end);
+  double get_mnr_pgf(rusage rstart, rusage rend);
+  double get_mjr_pgf(rusage rstart, rusage rend);
 #endif
   
   void check_lmdb(int success, const char* msg, bool verbose = true) {
@@ -307,14 +330,22 @@ private:
 
   void lmdb_seek_multiple(int skip_size) {
     int mdb_status = 0;
+    /*MDB_envinfo stat;
+    mdb_env_info(mdb_env_, &stat);
+    char* lmdb_buffer = mdb_get_me_map(mdb_env_);*/
+
     for (int i = 0; i < skip_size; i++) {
+      //printf("seek sample %d\n", i);
+      //mprotect(lmdb_buffer, (size_t) stat.me_mapsize, PROT_NONE);
       mdb_status = mdb_cursor_get(mdb_cursor, NULL, NULL, MDB_NEXT);
       if (mdb_status == MDB_NOTFOUND) {
         lmdb_seek_to_first();
+        printf("seek to first\n");
       } else {
         check_lmdb(mdb_status, "Seek multiple", false);
       }
     }
+    //num_seeked_pages += skip_size;
   }
 
   void lmdb_next_fetch() {
@@ -334,8 +365,11 @@ private:
     lmdb_seek_to_first();
 #ifndef ICPADS
     /* shift the cursor */
+    //if (reader_id != reader_size - 1)
+    //  lmdb_seek_multiple(offset * (reader_size - reader_id - 1));
     if (reader_id != 0)
-      lmdb_seek_multiple(reader_id * offset);
+      lmdb_seek_multiple(offset * reader_id);
+
 #endif
   }
 
