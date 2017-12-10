@@ -163,6 +163,9 @@ struct iter_time_t {
   double mpi_io_time;
   double compute_offset_time;
   double adjust_offset_time;
+  double recv_notification_time;
+  double send_notification_time;
+  size_t total_bytes_read;
 };
 
 #endif

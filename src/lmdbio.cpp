@@ -137,6 +137,9 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   iter_time.mpi_io_time = 0.0;
   iter_time.compute_offset_time = 0.0;
   iter_time.adjust_offset_time = 0.0;
+  iter_time.total_bytes_read = 0;
+  iter_time.recv_notification_time = 0;
+  iter_time.send_notification_time = 0;
   start = MPI_Wtime();
 #endif
 
@@ -750,6 +753,7 @@ void lmdbio::db::read_batch() {
   struct rusage rstart, rend;
   double ttime, utime, stime, sltime, start, end, start_, mpi_io_time;
 
+  start_ = MPI_Wtime();
 #endif
   /* wait for the previous group to be done */
   if (reader_size > group_size) {
@@ -765,6 +769,7 @@ void lmdbio::db::read_batch() {
     }
   }
 #ifdef BENCHMARK
+  iter_time.recv_notification_time += get_elapsed_time(start_, MPI_Wtime());
   start = MPI_Wtime();
   getrusage(RUSAGE_SELF, &rstart);
   start_ = MPI_Wtime();
@@ -787,6 +792,7 @@ void lmdbio::db::read_batch() {
     printf("lmdbio: invalid target bytes %zd\n", target_bytes);
   }
   assert(target_bytes > 0);
+  iter_time.total_bytes_read += target_bytes;
 #ifdef BENCHMARK
   iter_time.compute_offset_time += get_elapsed_time(start_, MPI_Wtime());
 #endif
@@ -871,6 +877,7 @@ void lmdbio::db::read_batch() {
   parse_stat.add_stat(get_ctx_switches(rstart, rend), 
       get_inv_ctx_switches(rstart, rend),
       ttime, utime, stime, sltime);
+  start_ = MPI_Wtime();
 #endif
   /* notify the next group that the read is done */
   if (reader_size > group_size) {
@@ -883,6 +890,7 @@ void lmdbio::db::read_batch() {
     }
   }
 #ifdef BENCHMARK
+  iter_time.send_notification_time += get_elapsed_time(start_, MPI_Wtime());
 #endif
 }
 
