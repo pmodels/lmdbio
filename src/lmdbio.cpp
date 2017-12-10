@@ -449,7 +449,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   init_read_params(size);
 
   /* calculate win size - 2x larger than the estimated size */
-  this->win_size = subbatch_size * prefetch * size * 2 * sizeof(char);
+  this->win_size = (MPI_Aint) subbatch_size * (MPI_Aint) prefetch * (MPI_Aint) size * (MPI_Aint) 2 * (MPI_Aint) sizeof(char);
   assert(win_size > 0);
 
   if (prov_info_mode == MODE_PROV_INFO_ENABLED) {
