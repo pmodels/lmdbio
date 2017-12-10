@@ -747,7 +747,7 @@ void lmdbio::db::read_batch() {
   MPI_Offset *offsets;
   off_t start_offset, offset;
   int num_groups, group_no;
-  const int group_size = 16;
+  const int group_size = this->stagger_size;
   int is_done = 0;
 #ifdef BENCHMARK
   struct rusage rstart, rend;
@@ -756,7 +756,7 @@ void lmdbio::db::read_batch() {
   start_ = MPI_Wtime();
 #endif
   /* wait for the previous group to be done */
-  if (reader_size > group_size) {
+  if (group_size && reader_size > group_size) {
     num_groups = reader_size / group_size;
     group_no = reader_id / group_size;
     printf("reader %d, group size %d, num group %d, group no %d\n",
@@ -880,7 +880,7 @@ void lmdbio::db::read_batch() {
   start_ = MPI_Wtime();
 #endif
   /* notify the next group that the read is done */
-  if (reader_size > group_size) {
+  if (stagger_size && reader_size > group_size) {
     if (group_no != num_groups - 1) {
       is_done = 1;
       printf("reader %d, notify %d that its read has finished reading\n",
@@ -964,6 +964,10 @@ void lmdbio::db::set_records() {
 #ifdef BENCHMARK
  iter_time.set_record_time += get_elapsed_time(start, MPI_Wtime());
 #endif
+}
+
+void lmdbio::db::set_stagger_size(int stagger_size) {
+  this->stagger_size = stagger_size;
 }
 
 void lmdbio::db::set_prov_info(prov_info_t prov_info) {

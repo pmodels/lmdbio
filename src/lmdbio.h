@@ -184,6 +184,7 @@ public:
       int reader_size = 0, int prefetch = 0, int max_iter = 1);
   void set_mode(int dist_mode, int read_mode, int prov_info_mode);
   void set_prov_info(prov_info_t prov_info);
+  void set_stagger_size(int stagger_size);
 
   ~db() {
     printf("deconstructor is called\n");
@@ -285,6 +286,7 @@ private:
   int prefetch;
   int prefetch_count;
   int max_iter;
+  int stagger_size;
 
   /* params for computing offsets */
   prov_info_t prov_info;
