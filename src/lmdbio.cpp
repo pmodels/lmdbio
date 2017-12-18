@@ -498,7 +498,10 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   //printf("rank %d, reset size ptrs\n", local_rank);
 
   /* reset size ptr */
-  if (prov_info_mode != MODE_PROV_INFO_ENABLED) {
+  if (prov_info_mode == MODE_PROV_INFO_ENABLED) {
+    batch_offsets_addr = batch_offsets;
+  }
+  else {
     sizes += ((subbatch_size * prefetch) - size_win_size) * local_rank;
     batch_offsets += ((subbatch_size * prefetch) - size_win_size) * local_rank;
   }
@@ -957,7 +960,10 @@ void lmdbio::db::set_records() {
     records[i].set_record(subbatch_bytes + batch_offsets[i], size);
   }
   /* update size offset */
-  if (prov_info_mode != MODE_PROV_INFO_ENABLED) {
+  if (prov_info_mode == MODE_PROV_INFO_ENABLED) {
+    batch_offsets += subbatch_size;
+  }
+  else {
     sizes += size_offset;
     batch_offsets += size_offset;
   }
