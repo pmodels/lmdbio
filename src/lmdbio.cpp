@@ -1041,6 +1041,10 @@ int lmdbio::db::read_record_batch(void)
   if (global_rank == 0)
     printf("rank %d, read record batch iter %d\n", global_rank, iter);
   if (iter % prefetch == 0) {
+    /* reset batch offset pointer */
+    if (prov_info_mode == MODE_PROV_INFO_ENABLED) {
+        batch_offsets = batch_offsets_addr;
+    }
     if (is_reader()) {
       read_batch();
     }

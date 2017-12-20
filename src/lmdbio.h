@@ -246,6 +246,7 @@ private:
   int sublocal_rank;
   MPI_Offset* send_batch_offsets;
   MPI_Offset* batch_offsets;
+  MPI_Offset* batch_offsets_addr;
   int* send_sizes;
   int* sizes;
   int total_byte_size;
