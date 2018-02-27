@@ -102,17 +102,6 @@ private:
   double sltime;
 };
 
-struct prov_info_t {
-  int commit_iter;
-  int branch_num_keys;
-  int leaf_num_keys;
-  int data_num_pages;
-  long first_key;
-  off_t first_leaf_page_no;
-  bool overflow;
-  size_t max_data_size;
-};
-
 struct init_time_t {
   double init_var_time;
   double init_db_time;
@@ -170,6 +159,17 @@ struct iter_time_t {
 
 #endif
 
+struct prov_info_t {
+  int commit_iter;
+  int branch_num_keys;
+  int leaf_num_keys;
+  int data_num_pages;
+  long first_key;
+  off_t first_leaf_page_no;
+  bool overflow;
+  size_t max_data_size;
+};
+
 class db
 {
 public:
@@ -207,7 +207,6 @@ public:
     //MPI_Comm_free(&global_comm);
   }
 
-  int read_record_batch(void ***records, int *num_records, int **record_sizes);
   int get_batch_size(void);
   int read_record_batch(void);
   int get_num_records(void);
