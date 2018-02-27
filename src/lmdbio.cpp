@@ -432,7 +432,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 #endif
 
   /* getting data record size */
-  if (prov_info_mode == MODE_PROV_INFO_ENABLED) {
+  if (prov_info_mode == prov_info_mode_enum::ENABLE) {
     size = prov_info.max_data_size;
   }
   else {
@@ -452,7 +452,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   this->win_size = (MPI_Aint) subbatch_size * (MPI_Aint) prefetch * (MPI_Aint) size * (MPI_Aint) 2 * (MPI_Aint) sizeof(char);
   assert(win_size > 0);
 
-  if (prov_info_mode == MODE_PROV_INFO_ENABLED) {
+  if (prov_info_mode == prov_info_mode_enum::ENABLE) {
     size_win_size = subbatch_size * prefetch;
   }
   else {
@@ -461,10 +461,10 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   assert(size_win_size > 0);
 
   /* allocate neccessary buffer */
-  if (dist_mode == MODE_SHMEM) {
+  if (dist_mode == dist_mode_enum::SHMEM) {
     MPI_Comm io_comm = get_io_comm();
     /* allocate a shared buffer for sizes */
-    if (prov_info_mode != MODE_PROV_INFO_ENABLED) {
+    if (prov_info_mode != prov_info_mode_enum::ENABLE) {
       MPI_Win_allocate_shared(size_win_size * sizeof(int), sizeof(int),
           MPI_INFO_NULL, io_comm, &sizes, &size_win);
       MPI_Win_lock_all(MPI_MODE_NOCHECK, size_win);
@@ -487,7 +487,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 #endif
 
   /* get batch ptrs and sizes */
-  if (is_reader() && prov_info_mode != MODE_PROV_INFO_ENABLED)
+  if (is_reader() && prov_info_mode != prov_info_mode_enum::ENABLE)
     lmdb_seq_seek();
 
 #ifdef BENCHMARK
@@ -498,7 +498,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   //printf("rank %d, reset size ptrs\n", local_rank);
 
   /* reset size ptr */
-  if (prov_info_mode == MODE_PROV_INFO_ENABLED) {
+  if (prov_info_mode == prov_info_mode_enum::ENABLE) {
     batch_offsets_addr = batch_offsets;
   }
   else {
@@ -526,7 +526,7 @@ void lmdbio::db::open_db(const char* fname) {
   MDB_envinfo stat;
 
 #ifdef DIRECTIO
-  if (global_rank == 0 && prov_info_mode != MODE_PROV_INFO_ENABLED) {
+  if (global_rank == 0 && prov_info_mode != prov_info_mode_enum::ENABLE) {
 #endif
     srand(time(NULL));
     check_lmdb(mdb_env_create(&mdb_env_), "Created environment", false);
@@ -586,7 +586,7 @@ void lmdbio::db::open_db(const char* fname) {
   lmdb_buffer = (char*) addr;
   lmdb_me_map = lmdb_buffer;
 #elif DIRECTIO
-  if (global_rank == 0 && prov_info_mode != MODE_PROV_INFO_ENABLED) {
+  if (global_rank == 0 && prov_info_mode != prov_info_mode_enum::ENABLE) {
     rc = mdb_env_open(mdb_env_, fname, flags, 0664);
     lmdb_buffer = mdb_get_me_map(mdb_env_);
   }
@@ -613,7 +613,7 @@ void lmdbio::db::open_db(const char* fname) {
 #endif
 
 #ifdef DIRECTIO
-  if (global_rank == 0 && prov_info_mode != MODE_PROV_INFO_ENABLED) {
+  if (global_rank == 0 && prov_info_mode != prov_info_mode_enum::ENABLE) {
 #endif
     check_lmdb(mdb_txn_begin(mdb_env_, NULL, MDB_RDONLY, &mdb_txn),
         "Begun transaction", false);
@@ -780,7 +780,7 @@ void lmdbio::db::read_batch() {
   len = 0;
   /* if provenance info is provided, calculate offsets on the fly;
    * else get offsets from the array */
-  if (prov_info_mode == MODE_PROV_INFO_ENABLED) {
+  if (prov_info_mode == prov_info_mode_enum::ENABLE) {
     long start_key = (fetch_size * reader_size * (iter / prefetch))
       + (fetch_size * reader_id);
     long end_key = start_key + fetch_size - 1; /* needed!! */
@@ -813,7 +813,7 @@ void lmdbio::db::read_batch() {
   assert((ssize_t) (win_size * local_np) >= target_bytes);
 
   /* read data (single_fetch_size * prefetch) from pointers */
-  if (dist_mode == MODE_SHMEM) {
+  if (dist_mode == dist_mode_enum::SHMEM) {
 #if 0
     assert(bytes > 0 && bytes <= INT_MAX);
     while (remaining != 0) {
@@ -858,7 +858,7 @@ void lmdbio::db::read_batch() {
     }
 #endif
 
-    if (prov_info_mode != MODE_PROV_INFO_ENABLED) {
+    if (prov_info_mode != prov_info_mode_enum::ENABLE) {
       start_offset = batch_offsets[0];
       for (int i = 0; i < fetch_size; i++) {
         batch_offsets[i] -= start_offset;
@@ -935,14 +935,14 @@ void lmdbio::db::set_records() {
   double start;
   start = MPI_Wtime();
 #endif
-  if (dist_mode == MODE_SHMEM && iter % prefetch == 0) {
+  if (dist_mode == dist_mode_enum::SHMEM && iter % prefetch == 0) {
     MPI_Win_sync(batch_win);
-    if (prov_info_mode != MODE_PROV_INFO_ENABLED)
+    if (prov_info_mode != prov_info_mode_enum::ENABLE)
       MPI_Win_sync(size_win);
     MPI_Win_sync(batch_offset_win);
     MPI_Barrier(get_io_comm());
     MPI_Win_sync(batch_win);
-    if (prov_info_mode != MODE_PROV_INFO_ENABLED)
+    if (prov_info_mode != prov_info_mode_enum::ENABLE)
       MPI_Win_sync(size_win);
     MPI_Win_sync(batch_offset_win);
   }
@@ -950,17 +950,17 @@ void lmdbio::db::set_records() {
   iter_time.local_barrier_time += get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
-  if (prov_info_mode != MODE_PROV_INFO_ENABLED) {
+  if (prov_info_mode != prov_info_mode_enum::ENABLE) {
     size_offset = prefetch == 1 || (iter + 1) % prefetch == 0 ?
       subbatch_size * ((prefetch * (local_np - 1)) + 1) : subbatch_size;
   }
   for (int i = 0; i < subbatch_size; i++) {
-    size = prov_info_mode == MODE_PROV_INFO_ENABLED ? prov_info.max_data_size
+    size = prov_info_mode == prov_info_mode_enum::ENABLE ? prov_info.max_data_size
       : sizes[i];
     records[i].set_record(subbatch_bytes + batch_offsets[i], size);
   }
   /* update size offset */
-  if (prov_info_mode == MODE_PROV_INFO_ENABLED) {
+  if (prov_info_mode == prov_info_mode_enum::ENABLE) {
     batch_offsets += subbatch_size;
   }
   else {
@@ -996,16 +996,18 @@ void lmdbio::db::set_prov_info(prov_info_t prov_info) {
   node_count.push_back(0);
 }
 
-void lmdbio::db::set_mode(int dist_mode, int read_mode, int prov_info_mode) {
-  if (dist_mode == MODE_SHMEM)
+void lmdbio::db::set_mode(lmdbio::dist_mode_enum dist_mode,
+    lmdbio::read_mode_enum read_mode,
+    lmdbio::prov_info_mode_enum prov_info_mode) {
+  if (dist_mode == dist_mode_enum::SHMEM)
     cout << "Set dist mode to SHMEM" << endl;
-  if (read_mode == MODE_STRIDE)
+  if (read_mode == read_mode_enum::STRIDE)
     cout << "Set read mode to STRIDE" << endl;
-  else if (read_mode == MODE_CONT)
+  else if (read_mode == read_mode_enum::CONT)
     cout << "Set read mode to CONT" << endl;
-  if (prov_info_mode == MODE_PROV_INFO_ENABLED)
-    cout << "Set prov info to MODE_PROV_INFO_ENABLED" << endl;
-  else if (prov_info_mode == MODE_PROV_INFO_DISABLED)
+  if (prov_info_mode == prov_info_mode_enum::ENABLE)
+    cout << "Set prov info to prov_info_mode_enum::ENABLE" << endl;
+  else if (prov_info_mode == prov_info_mode_enum::DISABLE)
     cout << "Set prov info to MODE_PROV_INFO_DISABLED" << endl;
 
   this->dist_mode = dist_mode;
@@ -1042,7 +1044,7 @@ int lmdbio::db::read_record_batch(void)
     printf("rank %d, read record batch iter %d\n", global_rank, iter);
   if (iter % prefetch == 0) {
     /* reset batch offset pointer */
-    if (prov_info_mode == MODE_PROV_INFO_ENABLED) {
+    if (prov_info_mode == prov_info_mode_enum::ENABLE) {
         batch_offsets = batch_offsets_addr;
     }
     if (is_reader()) {

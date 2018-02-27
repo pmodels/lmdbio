@@ -22,15 +22,22 @@ using std::string;
 
 #define TEST_PHASE (0)
 #define TRAIN_PHASE (1)
-#define MODE_SCATTERV (0)
-#define MODE_SHMEM (1)
-#define MODE_STRIDE (0)
-#define MODE_CONT (1)
-#define MODE_PROV_INFO_DISABLED (0)
-#define MODE_PROV_INFO_ENABLED (1)
 #define PAGE_SIZE (4096)
 
 namespace lmdbio {
+
+enum dist_mode_enum {
+  SCATTERV, SHMEM
+};
+
+enum read_mode_enum {
+  STRIDE, CONT
+};
+
+enum prov_info_mode_enum {
+  ENABLE, DISABLE
+};
+
 class record {
 public:
   record() {
@@ -174,32 +181,33 @@ class db
 {
 public:
   db() {
-    dist_mode = MODE_SHMEM;
-    read_mode = MODE_STRIDE;
+    dist_mode = dist_mode_enum::SHMEM;
+    read_mode = read_mode_enum::STRIDE;
     num_missed_pages = 0;
     num_extra_pages = 0;
   }
 
   void init(MPI_Comm parent_comm, const char *fname, int batch_size,
       int reader_size = 0, int prefetch = 0, int max_iter = 1);
-  void set_mode(int dist_mode, int read_mode, int prov_info_mode);
+  void set_mode(dist_mode_enum dist_mode, read_mode_enum read_mode,
+      prov_info_mode_enum prov_info_mode);
   void set_prov_info(prov_info_t prov_info);
   void set_stagger_size(int stagger_size);
 
   ~db() {
     printf("deconstructor is called\n");
-    if (global_rank == 0 && prov_info_mode != MODE_PROV_INFO_ENABLED) {
+    if (global_rank == 0 && prov_info_mode != prov_info_mode_enum::ENABLE) {
       mdb_cursor_close(mdb_cursor);
       mdb_dbi_close(mdb_env_, mdb_dbi_);
       mdb_env_close(mdb_env_);
     }
-    if (dist_mode == MODE_SHMEM) {
+    if (dist_mode == dist_mode_enum::SHMEM) {
       MPI_Win_unlock_all(batch_win);
-      if (prov_info_mode != MODE_PROV_INFO_ENABLED)
+      if (prov_info_mode != prov_info_mode_enum::ENABLE)
         MPI_Win_unlock_all(size_win);
       MPI_Win_unlock_all(batch_offset_win);
       MPI_Win_free(&batch_win);
-      if (prov_info_mode != MODE_PROV_INFO_ENABLED)
+      if (prov_info_mode != prov_info_mode_enum::ENABLE)
         MPI_Win_free(&size_win);
       MPI_Win_free(&batch_offset_win);
     }
@@ -272,9 +280,9 @@ private:
   MDB_dbi mdb_dbi_;
   MDB_val mdb_key_, mdb_value_;
   int valid_;
-  int dist_mode;
-  int read_mode;
-  int prov_info_mode;
+  dist_mode_enum dist_mode;
+  read_mode_enum read_mode;
+  prov_info_mode_enum prov_info_mode;
   char* lmdb_buffer;
   char* meta_buffer;
   int read_pages;
