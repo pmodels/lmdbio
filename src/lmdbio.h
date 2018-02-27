@@ -7,6 +7,8 @@
 #ifndef LMDBIO_H_INCLUDED
 #define LMDBIO_H_INCLUDED
 
+#include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 #include <iostream>
 #include <string.h>
 #include <stdlib.h>
@@ -16,6 +18,8 @@
 #include <sys/resource.h>
 #include <vector>
 #include <string>
+
+namespace py = pybind11;
 
 using std::vector;
 using std::string;
@@ -55,6 +59,8 @@ public:
     this->data = data;
     this->record_size = record_size;
   }
+  /* convert byte array to numpy array for Python binding */
+  py::array_t<char> py_get_record() const;
 
 public:
   void *data;
@@ -220,6 +226,12 @@ public:
   int get_num_records(void);
   record* get_record(int i);
   bool is_reader();
+
+  /* Python binding methods */
+  void py_init(const char *fname, int batch_size,
+      int reader_size = 0, int prefetch = 0, int max_iter = 1);
+  void py_set_prov_info(py::object prov_info);
+  py::object py_get_record(int i);
 
 #ifdef BENCHMARK
   int remap_iter;
