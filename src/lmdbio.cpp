@@ -53,8 +53,13 @@ int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
   return 0;
 }
 
-void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
-    int reader_size, int coalescing_size, int max_iter) {
+void lmdbio::db::init(
+    MPI_Comm parent_comm,
+    const char* fname,
+    int batch_size,
+    int reader_size,
+    int coalescing_size,
+    int max_iter) {
 #ifdef BENCHMARK
   double start, end;
   init_time.init_var_time = 0.0;
@@ -589,8 +594,11 @@ void lmdbio::db::open_db(const char* fname) {
 }
 
 /* compute data offsets based on provided provenance info */
-void lmdbio::db::compute_data_offsets(long start_key, long end_key,
-    off_t *start_offset, ssize_t *bytes) {
+void lmdbio::db::compute_data_offsets(
+    long start_key,
+    long end_key,
+    off_t *start_offset,
+    ssize_t *bytes) {
 
   assert(prev_key <= start_key && start_key <= end_key);
 
@@ -919,7 +927,8 @@ void lmdbio::db::set_prov_info(prov_info_t prov_info) {
   node_count.push_back(0);
 }
 
-void lmdbio::db::set_mode(lmdbio::dist_mode_enum dist_mode,
+void lmdbio::db::set_mode(
+    lmdbio::dist_mode_enum dist_mode,
     lmdbio::read_mode_enum read_mode,
     lmdbio::prov_info_mode_enum prov_info_mode) {
   if (dist_mode == dist_mode_enum::SHMEM)
@@ -991,8 +1000,11 @@ bool lmdbio::db::is_read_iter() {
 }
 
 /* read one or more batches and return number of data records read */
-int lmdbio::db::read_bulk(int bulk_read_num_batches, const int** bulk_sizes,
-    const void** bulk_bytes, const long long int** bulk_offsets) {
+int lmdbio::db::read_bulk(
+    int bulk_read_num_batches,
+    const int** bulk_sizes,
+    const void** bulk_bytes,
+    const long long int** bulk_offsets) {
   update_buffer_offsets();
   *bulk_sizes = sizes;
   *bulk_bytes = (void*)(subbatch_bytes);

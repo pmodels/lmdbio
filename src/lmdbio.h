@@ -79,8 +79,13 @@ public:
     sltime = 0.0;
   }
 
-  void add_stat(double ctx_switches, double inv_ctx_switches,
-      double ttime, double utime, double stime, double sltime) {
+  void add_stat(
+      double ctx_switches,
+      double inv_ctx_switches,
+      double ttime,
+      double utime,
+      double stime,
+      double sltime) {
     this->ctx_switches += ctx_switches;
     this->inv_ctx_switches += inv_ctx_switches;
     this->ttime += ttime;
@@ -89,8 +94,13 @@ public:
     this->sltime += sltime;
   }
 
-  void set_stat(double ctx_switches, double inv_ctx_switches,
-      double ttime, double utime, double stime, double sltime) {
+  void set_stat(
+      double ctx_switches,
+      double inv_ctx_switches,
+      double ttime,
+      double utime,
+      double stime,
+      double sltime) {
     this->ctx_switches = ctx_switches;
     this->inv_ctx_switches = inv_ctx_switches;
     this->ttime = ttime;
@@ -193,9 +203,16 @@ public:
     num_extra_pages = 0;
   }
 
-  void init(MPI_Comm parent_comm, const char *fname, int batch_size,
-      int reader_size = 0, int coalescing_size = 0, int max_iter = 1);
-  void set_mode(dist_mode_enum dist_mode, read_mode_enum read_mode,
+  void init(
+      MPI_Comm parent_comm,
+      const char *fname,
+      int batch_size,
+      int reader_size = 0,
+      int coalescing_size = 0,
+      int max_iter = 1);
+  void set_mode(
+      dist_mode_enum dist_mode,
+      read_mode_enum read_mode,
       prov_info_mode_enum prov_info_mode);
   void set_prov_info(prov_info_t prov_info);
   void set_stagger_size(int stagger_size);
@@ -223,16 +240,23 @@ public:
 
   int get_batch_size(void);
   void read_record_batch(void);
-  int read_bulk(int bulk_read_num_batches, const int** bulk_sizes,
-      const void** bulk_bytes, const long long int** bulk_offsets);
+  int read_bulk(
+      int bulk_read_num_batches,
+      const int** bulk_sizes,
+      const void** bulk_bytes,
+      const long long int** bulk_offsets);
   int get_num_records(void);
   record* get_record(int i);
   bool is_reader();
   bool is_read_iter();
 
   /* Python binding methods */
-  void py_init(const char *fname, int batch_size,
-      int reader_size = 0, int coalescing_size = 0, int max_iter = 1);
+  void py_init(
+      const char *fname,
+      int batch_size,
+      int reader_size = 0,
+      int coalescing_size = 0,
+      int max_iter = 1);
   void py_set_prov_info(py::object prov_info);
   py::object py_get_record(int i);
 
@@ -337,8 +361,11 @@ private:
   void lmdb_remap_buff();
   void lmdb_seq_seek();
   void lmdb_init_cursor();
-  void compute_data_offsets(long start_key, long end_key,
-      off_t *start_offset, ssize_t *bytes);
+  void compute_data_offsets(
+      long start_key,
+      long end_key,
+      off_t *start_offset,
+      ssize_t *bytes);
   MPI_Comm get_io_comm();
   int get_io_np();
 
