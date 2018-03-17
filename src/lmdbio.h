@@ -217,7 +217,7 @@ public:
   void set_stagger_size(int stagger_size);
 
   ~db() {
-    printf("deconstructor is called\n");
+    std::cout << "lmdbio: deconstructor is called" << std::endl;
     if (global_rank == 0 && prov_info_mode != prov_info_mode_enum::ENABLE) {
       mdb_cursor_close(mdb_cursor);
       mdb_dbi_close(mdb_env_, mdb_dbi_);
@@ -385,10 +385,10 @@ private:
   void check_lmdb(int success, const char* msg, bool verbose = true) {
     if (success == 0) {
       if (verbose)
-        std::cout << "Successfully " << msg << std::endl;
+        std::cout << "lmdbio: successfully " << msg << std::endl;
     }
     else {
-      std::cout << "Not successfully " << msg << std::endl;
+      std::cout << "lmdbio: not successfully " << msg << std::endl;
     }
   }
 

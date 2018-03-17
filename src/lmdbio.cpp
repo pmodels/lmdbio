@@ -30,11 +30,12 @@ char* lmdb_me_fmap;
 int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 {
     num_page_faults++;
-    printf("got a SIGSEGV at %p, num_page_faults %llu\n", __sig->si_addr,
-           num_page_faults);
+    printf("lmdbio: got a SIGSEGV at %p, num_page_faults %llu\n",
+        __sig->si_addr,
+        num_page_faults);
 
     /* set the page to be accessible again */
-    printf("unprotecting page %p, %d bytes\n",
+    printf("lmdbio: unprotecting page %p, %d bytes\n",
         GET_PAGE(__sig->si_addr),
         getpagesize());
     if (GET_PAGE(__sig->si_addr) == __sig->si_addr)
@@ -51,7 +52,8 @@ int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 {
   char* fault_addr = GET_PAGE(__sig->si_addr);
-  //printf("lmdbio: FAULT at %p, for 4096 -------\n", fault_addr);
+  /*printf("lmdbio: FAULT at %p, for 4096 -------\n",
+      fault_addr);*/
   size_t offset = (size_t) (fault_addr - lmdb_me_map);
   mprotect(fault_addr, getpagesize(), PROT_READ | PROT_WRITE);
   memcpy(fault_addr, lmdb_me_fmap + offset, getpagesize());
@@ -130,13 +132,13 @@ void lmdbio::db::init(
   MPI_Comm_size(MPI_COMM_WORLD, &global_np);
   MPI_Comm_rank(MPI_COMM_WORLD, &global_rank);
 
-  cout << "Global rank " << global_rank << endl;
-  cout << "Global np " << global_np << endl;
+  cout << "lmdbio: global rank " << global_rank << endl;
+  cout << "lmdbio: global np " << global_np << endl;
 
   this->max_iter = max_iter;
   this->batch_size = batch_size;
   this->subbatch_size = batch_size / global_np;
-  cout << "Subbatch size " << this->subbatch_size << endl;
+  cout << "lmdbio: subbatch size " << this->subbatch_size << endl;
 #ifdef BENCHMARK
   end = MPI_Wtime();
   init_time.init_var_time = get_elapsed_time(start, end);
@@ -145,7 +147,7 @@ void lmdbio::db::init(
 
   this->reader_size = reader_size;
   assert(reader_size <= global_np);
-  cout << "Reader size is set to " << reader_size << endl;
+  cout << "lmdbio: reader size is set to " << reader_size << endl;
 
   this->local_reader_size = 0;
   this->coalescing_size = coalescing_size;
@@ -180,16 +182,18 @@ void lmdbio::db::init_read_params(int sample_size) {
   coalescing_size = round_up_power_of_two(coalescing_size);
   coalescing_size = coalescing_size > max_iter ? max_iter : coalescing_size;
   assert(this->coalescing_size);
-  cout << "Coalescing size: " << this->coalescing_size << " OPT_READ_CHUNK "
-    << OPT_READ_CHUNK << " num_read_pages " << num_read_pages
-    << " page size " << getpagesize() << " max coalescing size " << max_iter
+  cout << "lmdbio: coalescing size " << this->coalescing_size <<
+    ", OPT_READ_CHUNK " << OPT_READ_CHUNK <<
+    ", num_read_pages " << num_read_pages <<
+    ", page size " << getpagesize() <<
+    ", max coalescing size " << max_iter
     << endl;
 
   /* recalculate number of pages to read and fetch size */
   if (is_reader(local_rank)) {
     fetch_size *= coalescing_size;
-    cout << "Fetch size: " << fetch_size << endl;
-    printf("LMDB buffer address %p\n", lmdb_buffer);
+    cout << "lmdbio: fetch size: " << fetch_size << endl;
+    printf("lmdbio: LMDB buffer address %p\n", lmdb_buffer);
     /* skip the first few pages as they are the meta pages */
     fflush(stdout);
   }
@@ -215,7 +219,7 @@ void lmdbio::db::lmdb_seq_seek() {
   start = MPI_Wtime();
 #endif
 
-  printf("rank %d, seq seek\n");
+  cout << "lmdbio: seq seek" << endl;
 
   single_fetch_size = fetch_size / coalescing_size;
   blockcount = max_iter / coalescing_size;
@@ -269,7 +273,10 @@ void lmdbio::db::lmdb_seq_seek() {
     for (int i = 0; i < send_buff_size; i++) {
       send_batch_offsets[i] = (char*) lmdb_value_data() - lmdb_buffer;
       send_sizes[i] = lmdb_value_size();
-      printf("rank %d, read item %d size %d at %p\n", reader_id, i, send_sizes[i], send_batch_ptrs[i]);
+      /*printf("lmdbio: read item %d size %d at %p\n",
+          i,
+          send_sizes[i],
+          send_batch_offsets[i]);*/
       lmdb_next();
     }
   }
@@ -369,7 +376,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   local_reader_size = reader_size / node_size;
   assert(local_reader_size);
 
-  //cout << "Local reader size is " << local_reader_size << endl;
+  cout << "lmdbio: local reader size is " << local_reader_size << endl;
 
   is_single_reader_per_node = local_reader_size == 1;
 
@@ -381,7 +388,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
     assert(sublocal_comm != MPI_COMM_NULL);
     MPI_Comm_size(sublocal_comm, &sublocal_np);
     MPI_Comm_rank(sublocal_comm, &sublocal_rank);
-    //cout << "Rank " << global_rank << " sublocal id " << sublocal_id << 
+    //cout << "lmdbio: rank " << global_rank << " sublocal id " << sublocal_id << 
     //  " sublocal rank " << sublocal_rank << endl;
   }
 
@@ -400,8 +407,9 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   if (is_reader(local_rank)) {
     char hostname[256];
     gethostname(hostname, 255);
-    cout << "Number of readers " << reader_size << endl;
-    cout << "Rank " << global_rank << " is a reader id " << reader_id << 
+    cout << "lmdbio: number of readers " << reader_size << endl;
+    cout << "lmdbio: rank " << global_rank <<
+      " is a reader id " << reader_id <<
       " on host " << hostname << endl;
   }
 #ifdef BENCHMARK
@@ -527,7 +535,7 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   start = MPI_Wtime();
 #endif
 
-  //printf("rank %d, reset size ptrs\n", local_rank);
+  cout << "lmdbio: rank " << local_rank << ", reset size ptrs" << endl;
 
   /* reset size ptr */
   if (prov_info_mode == prov_info_mode_enum::ENABLE) {
@@ -588,24 +596,25 @@ void lmdbio::db::open_db(const char* fname) {
       snprintf(addr_str, 100, "MMAP_ADDRESS=%llu", addr);
       cout << addr_str << endl;
       putenv(addr_str);
-      //cout << "mapping file " << fname << endl;
+      //cout << "lmdbio: mapping file " << fname << endl;
       rc = mdb_env_open(mdb_env_, fname, flags, 0664);
-      //cout << "reader " << reader_id << " error code " << rc << endl;
+      //cout << "lmdbio: reader " << reader_id << " error code " << rc << endl;
       if (rc != 0) {
-        cout << "mmap failed; trying again\n";
+        cout << "lmdbio: mmap failed; trying again\n";
         continue;
       }
     }
     MPI_Bcast(addr_str, 100, MPI_CHAR, 0, reader_comm);
     if (global_rank != 0) {
       putenv(addr_str);
-      cout << "trying to mmap with address " << addr_str << endl;
+      cout << "lmdbio: trying to mmap with address " << addr_str << endl;
       rc = mdb_env_open(mdb_env_, fname, flags, 0664);
-      //cout << "reader " << reader_id << " error code " << rc << endl;
+      //cout << "lmdbio: reader " << reader_id << " error code " << rc << endl;
     }
     MPI_Allreduce(&rc, &success, 1, MPI_INT, MPI_MAX, reader_comm);
     if (success == 0) {
-      printf("all processes got the same address %llu\n", addr);
+      cout << "lmdbio: all processes got the same address" << addr <<
+        endl;
       break;
     }
     if (rc == 0)
@@ -613,7 +622,7 @@ void lmdbio::db::open_db(const char* fname) {
     rc = success;
   }
   if (rc != 0) {
-    cout << "Cannot open db" << endl;
+    cout << "lmdbio: cannot open db" << endl;
     exit(1);
   }
   /* set lmdb buffer */
@@ -634,7 +643,7 @@ void lmdbio::db::open_db(const char* fname) {
   fd = open(filename, O_RDONLY);
 #else
   rc = mdb_env_open(mdb_env_, fname, flags, 0664);
-  //cout << "reader " << reader_id << " error code " << rc << endl;
+  //cout << "lmdbio: reader " << reader_id << " error code " << rc << endl;
 #endif
 
 #ifdef DIRECTIO
@@ -798,11 +807,14 @@ void lmdbio::db::read_all() {
     if (group_size && reader_size > group_size) {
       num_groups = reader_size / group_size;
       group_no = reader_id / group_size;
-      printf("reader %d, group size %d, num group %d, group no %d\n",
-          group_size, reader_id, num_groups, group_no);
-      if (group_no != 0) {
-        printf("reader %d, wait for %d to finish reading\n",
-            reader_id, reader_id - group_size);
+      cout << "lmdbio: reader " << reader_id <<
+        ", group size " << group_size <<
+        ", num group " << num_groups <<
+        ", group no " << group_no << endl;
+        if (group_no != 0) {
+        cout << "lmdbio: reader " << reader_id <<
+          ", wait for " << (reader_id - group_size) <<
+          " to finish reading" << endl;
         MPI_Recv(
             &is_done,
             1,
@@ -837,7 +849,8 @@ void lmdbio::db::read_all() {
         sizes[fetch_size - 1];
     }
     if (target_bytes <= 0) {
-      printf("lmdbio: invalid target bytes %zd\n", target_bytes);
+      cout << "lmdbio: invalid target bytes " << target_bytes <<
+        endl;
     }
     assert(target_bytes > 0);
     iter_time.total_bytes_read += target_bytes;
@@ -845,8 +858,9 @@ void lmdbio::db::read_all() {
     iter_time.compute_offset_time += get_elapsed_time(start_, MPI_Wtime());
 #endif
     if ((ssize_t) (win_size * local_np) < target_bytes) {
-      printf("rank %d, bytes overflow, win size %zd, target bytes %zd\n",
-          reader_id, (ssize_t) win_size * local_np, target_bytes);
+      cout << "lmdbio: rank " << reader_id <<
+        ", bytes overflow, win size " << ((ssize_t) win_size * local_np) <<
+        ", target bytes " << target_bytes << endl;
     }
     assert((ssize_t) (win_size * local_np) >= target_bytes);
 
@@ -872,18 +886,18 @@ void lmdbio::db::read_all() {
         mpi_io_time = get_elapsed_time(start_, MPI_Wtime());
         iter_time.mpi_io_time += mpi_io_time;
         start_ = MPI_Wtime();
-        //printf("iter %d, read %zu bytes, time %.2f, start offset %lld, end offset %lld\n", iter, target_bytes, mpi_io_time, start_offset, batch_offsets[fetch_size - 1]);
 #endif
       if (prov_info_mode != prov_info_mode_enum::ENABLE) {
         start_offset = batch_offsets[0];
         for (int i = 0; i < fetch_size; i++) {
           batch_offsets[i] -= start_offset;
-          //printf("item %d, subbatch offset %lld\n", i, batch_offsets[i]);
+          /*cout << "lmdbio: item " << i <<
+            ", subbatch offset " << batch_offsets[i] << endl;*/
         }
       }
     }
 
-    //printf("lmdbio: done parsing batch\n");
+    cout << "lmdbio: done parsing batch" << endl;
 
 #ifdef BENCHMARK
     iter_time.adjust_offset_time += get_elapsed_time(start_, MPI_Wtime());
@@ -906,8 +920,9 @@ void lmdbio::db::read_all() {
     if (stagger_size && reader_size > group_size) {
       if (group_no != num_groups - 1) {
         is_done = 1;
-        printf("reader %d, notify %d that its read has finished reading\n",
-            reader_id, reader_id + group_size);
+        cout << "lmdbio: reader " << reader_id <<
+          ", notify " << (reader_id + group_size) <<
+          " that its read has finished reading" << endl;
         MPI_Send(
             &is_done,
             1,
@@ -954,7 +969,7 @@ void lmdbio::db::send_batch() {
   start = MPI_Wtime();
 #endif
   MPI_Comm comm = get_io_comm();
-  //cout << "send batch " << send_sizes[0] << endl;
+  //cout << "lmdbio: send batch " << send_sizes[0] << endl;
   /* send data size */
   MPI_Scatter(
       send_sizes,
@@ -966,13 +981,13 @@ void lmdbio::db::send_batch() {
       0,
       comm);
 
-  //cout << "scatter size completed" << endl; 
+  //cout << "lmdbio: scatter size completed" << endl; 
   /* get total size */
   for (int i = 0; i < subbatch_size; i++) {
     count += sizes[i];
   }
 
-  //cout << "count size completed" << endl;
+  //cout << "lmdbio: count size completed" << endl;
   /* send sub-batch */
   MPI_Scatterv(
       batch_bytes,
@@ -985,7 +1000,7 @@ void lmdbio::db::send_batch() {
       0,
       comm);
 
-  //cout << "scatterv batch completed" << endl;
+  //cout << "lmdbio: scatterv batch completed" << endl;
 #ifdef BENCHMARK
   iter_time.mpi_time += get_elapsed_time(start, MPI_Wtime());
 #endif
@@ -1037,15 +1052,15 @@ void lmdbio::db::set_mode(
     lmdbio::read_mode_enum read_mode,
     lmdbio::prov_info_mode_enum prov_info_mode) {
   if (dist_mode == dist_mode_enum::SHMEM)
-    cout << "Set dist mode to SHMEM" << endl;
+    cout << "lmdbio: set dist mode to SHMEM" << endl;
   if (read_mode == read_mode_enum::STRIDE)
-    cout << "Set read mode to STRIDE" << endl;
+    cout << "lmdbio: set read mode to STRIDE" << endl;
   else if (read_mode == read_mode_enum::CONT)
-    cout << "Set read mode to CONT" << endl;
+    cout << "lmdbio: set read mode to CONT" << endl;
   if (prov_info_mode == prov_info_mode_enum::ENABLE)
-    cout << "Set prov info to prov_info_mode_enum::ENABLE" << endl;
+    cout << "lmdbio: set prov info to MODE_PROV_INFO_ENABLE" << endl;
   else if (prov_info_mode == prov_info_mode_enum::DISABLE)
-    cout << "Set prov info to MODE_PROV_INFO_DISABLED" << endl;
+    cout << "lmdbio: set prov info to MODE_PROV_INFO_DISABLED" << endl;
 
   this->dist_mode = dist_mode;
   this->read_mode = read_mode;
@@ -1053,14 +1068,14 @@ void lmdbio::db::set_mode(
 }
 
 void lmdbio::db::lmdb_touch_pages() {
-  /*printf("touching data from page %d to %d\n",
-      start_pg, start_pg + read_pages);*/
+  /*cout << "lmdbio: touching data from page " << start_pg <<
+    " to " << (start_pg + read_pages) << endl;*/
   for (size_t i = start_pg; i < start_pg + read_pages; i++) {
-      //printf("touching page %d\n", i);
+      //cout << "lmdbio: touching page " << i << endl;
       //for (size_t j = 0; j < PAGE_SIZE; j++)
       tmp += lmdb_buffer[PAGE_SIZE * i];
   }
-  //printf("done touching pages\n");
+  //cout << "lmdbio: done touching pages" << endl;
 }
 
 /* a process with local rank = 0 is a reader  */
