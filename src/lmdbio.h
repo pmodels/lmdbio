@@ -194,7 +194,7 @@ public:
   }
 
   void init(MPI_Comm parent_comm, const char *fname, int batch_size,
-      int reader_size = 0, int prefetch = 0, int max_iter = 1);
+      int reader_size = 0, int coalescing_size = 0, int max_iter = 1);
   void set_mode(dist_mode_enum dist_mode, read_mode_enum read_mode,
       prov_info_mode_enum prov_info_mode);
   void set_prov_info(prov_info_t prov_info);
@@ -231,7 +231,7 @@ public:
 
   /* Python binding methods */
   void py_init(const char *fname, int batch_size,
-      int reader_size = 0, int prefetch = 0, int max_iter = 1);
+      int reader_size = 0, int coalescing_size = 0, int max_iter = 1);
   void py_set_prov_info(py::object prov_info);
   py::object py_get_record(int i);
 
@@ -304,7 +304,7 @@ private:
   int num_missed_pages;
   int num_extra_pages;
   int iter;
-  int prefetch;
+  int coalescing_size;
   int prefetch_count;
   int max_iter;
   int stagger_size;

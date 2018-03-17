@@ -89,7 +89,7 @@ void lmdbio::db::lmdb_direct_io(int start_pg, int read_pages) {
 #endif
 
 void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
-    int reader_size, int prefetch, int max_iter) {
+    int reader_size, int coalescing_size, int max_iter) {
 #ifdef BENCHMARK
   double start, end;
   init_time.init_var_time = 0.0;
@@ -173,7 +173,7 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   cout << "Reader size is set to " << reader_size << endl;
 
   this->local_reader_size = 0;
-  this->prefetch = prefetch;
+  this->coalescing_size = coalescing_size;
   
   assign_readers(fname, batch_size);
   bytes_read = 0;
@@ -199,20 +199,20 @@ void lmdbio::db::init_read_params(int sample_size) {
     + (PAGE_SIZE * !!(sample_size % PAGE_SIZE));
   num_read_pages = (sample_size * fetch_size) / PAGE_SIZE;
 
-  /* calculate prefetch size */
-  prefetch = prefetch ? prefetch :
+  /* calculate coalescing_size */
+  coalescing_size = coalescing_size ? coalescing_size:
     ceil((float) OPT_READ_CHUNK / (num_read_pages * getpagesize()));
-  prefetch = round_up_power_of_two(prefetch);
-  prefetch = prefetch > max_iter ? max_iter : prefetch;
-  assert(this->prefetch);
-  cout << "Prefetch: " << this->prefetch << " OPT_READ_CHUNK " 
+  coalescing_size = round_up_power_of_two(coalescing_size);
+  coalescing_size = coalescing_size > max_iter ? max_iter : coalescing_size;
+  assert(this->coalescing_size);
+  cout << "Coalescing size: " << this->coalescing_size << " OPT_READ_CHUNK "
     << OPT_READ_CHUNK << " num_read_pages " << num_read_pages
-    << " page size " << getpagesize() << " max prefetch " << max_iter
+    << " page size " << getpagesize() << " max coalescing size " << max_iter
     << endl;
 
   /* recalculate number of pages to read and fetch size */
   if (is_reader(local_rank)) {
-    fetch_size *= prefetch;
+    fetch_size *= coalescing_size;
     cout << "Fetch size: " << fetch_size << endl;
     printf("LMDB buffer address %p\n", lmdb_buffer);
     /* skip the first few pages as they are the meta pages */
@@ -242,8 +242,8 @@ void lmdbio::db::lmdb_seq_seek() {
 
   printf("rank %d, seq seek\n");
 
-  single_fetch_size = fetch_size / prefetch;
-  blockcount = max_iter / prefetch;
+  single_fetch_size = fetch_size / coalescing_size;
+  blockcount = max_iter / coalescing_size;
   blocklen = fetch_size;
   stride = blocklen * reader_size;
   recv_buff_size = single_fetch_size * max_iter;
@@ -446,15 +446,15 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
     MPI_Bcast(&size, 1, MPI_INT, 0, MPI_COMM_WORLD);
   }
 
-  /* init number of read pages, prefetch, and fetch size */
+  /* init number of read pages, coalescing_size, and fetch size */
   init_read_params(size);
 
   /* calculate win size - 2x larger than the estimated size */
-  this->win_size = (MPI_Aint) subbatch_size * (MPI_Aint) prefetch * (MPI_Aint) size * (MPI_Aint) 2 * (MPI_Aint) sizeof(char);
+  this->win_size = (MPI_Aint) subbatch_size * (MPI_Aint) coalescing_size * (MPI_Aint) size * (MPI_Aint) 2 * (MPI_Aint) sizeof(char);
   assert(win_size > 0);
 
   if (prov_info_mode == prov_info_mode_enum::ENABLE) {
-    size_win_size = subbatch_size * prefetch;
+    size_win_size = subbatch_size * coalescing_size;
   }
   else {
     size_win_size = subbatch_size * max_iter;
@@ -503,8 +503,8 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
     batch_offsets_addr = batch_offsets;
   }
   else {
-    sizes += ((subbatch_size * prefetch) - size_win_size) * local_rank;
-    batch_offsets += ((subbatch_size * prefetch) - size_win_size) * local_rank;
+    sizes += ((subbatch_size * coalescing_size) - size_win_size) * local_rank;
+    batch_offsets += ((subbatch_size * coalescing_size) - size_win_size) * local_rank;
   }
   /* reset subbatch bytes ptr to zero */
   subbatch_bytes -= (win_size / sizeof(char)) * local_rank;
@@ -783,7 +783,7 @@ void lmdbio::db::read_all() {
     /* if provenance info is provided, calculate offsets on the fly;
      * else get offsets from the array */
     if (prov_info_mode == prov_info_mode_enum::ENABLE) {
-      long start_key = (fetch_size * reader_size * (iter/ prefetch))
+      long start_key = (fetch_size * reader_size * (iter/ coalescing_size))
         + (fetch_size * reader_id);
       long end_key = start_key + fetch_size - 1; /* needed!! */
       compute_data_offsets(start_key, end_key, &start_offset, &target_bytes);
@@ -814,7 +814,7 @@ void lmdbio::db::read_all() {
     }
     assert((ssize_t) (win_size * local_np) >= target_bytes);
 
-    /* read data (single_fetch_size * prefetch) from pointers */
+    /* read data (single_fetch_size * coalescing_size) from pointers */
     if (dist_mode == dist_mode_enum::SHMEM) {
 #if 0
       assert(bytes > 0 && bytes <= INT_MAX);
@@ -1039,14 +1039,14 @@ bool lmdbio::db::is_reader() {
 void lmdbio::db::update_buffer_offsets() {
   /* update size offset */
   if (prov_info_mode == prov_info_mode_enum::ENABLE) {
-    if (iter % prefetch == 0)
+    if (iter % coalescing_size == 0)
       batch_offsets = batch_offsets_addr;
     else
       batch_offsets += subbatch_size;
   }
   else {
-    int size_offset = (iter == 0) ? 0 : (prefetch == 1 || iter % prefetch == 0 ?
-        subbatch_size * ((prefetch * (local_np - 1)) + 1) : subbatch_size);
+    int size_offset = (iter == 0) ? 0 : (coalescing_size == 1 || iter % coalescing_size == 0 ?
+        subbatch_size * ((coalescing_size * (local_np - 1)) + 1) : subbatch_size);
     sizes += size_offset;
     batch_offsets += size_offset;
   }
@@ -1055,7 +1055,7 @@ void lmdbio::db::update_buffer_offsets() {
 /* read one batch of data and set records */
 void lmdbio::db::read_record_batch(void) {
   update_buffer_offsets();
-  if (iter % prefetch == 0)
+  if (iter % coalescing_size == 0)
     read_all();
   set_records();
   iter++;
@@ -1070,7 +1070,7 @@ int lmdbio::db::read_bulk(int bulk_read_num_batches, const int** bulk_sizes,
   *bulk_offsets = batch_offsets;
   if (!num_read_batch) {
     read_all();
-    num_read_batch = prefetch;
+    num_read_batch = coalescing_size;
   }
   num_read_batch -= bulk_read_num_batches;
   iter += bulk_read_num_batches;
