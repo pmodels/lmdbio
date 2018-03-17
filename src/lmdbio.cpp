@@ -1039,13 +1039,13 @@ bool lmdbio::db::is_reader() {
 void lmdbio::db::update_buffer_offsets() {
   /* update size offset */
   if (prov_info_mode == prov_info_mode_enum::ENABLE) {
-    if (iter % coalescing_size == 0)
+    if (is_read_iter())
       batch_offsets = batch_offsets_addr;
     else
       batch_offsets += subbatch_size;
   }
   else {
-    int size_offset = (iter == 0) ? 0 : (coalescing_size == 1 || iter % coalescing_size == 0 ?
+    int size_offset = (iter == 0) ? 0 : (coalescing_size == 1 || is_read_iter() ?
         subbatch_size * ((coalescing_size * (local_np - 1)) + 1) : subbatch_size);
     sizes += size_offset;
     batch_offsets += size_offset;
@@ -1055,10 +1055,14 @@ void lmdbio::db::update_buffer_offsets() {
 /* read one batch of data and set records */
 void lmdbio::db::read_record_batch(void) {
   update_buffer_offsets();
-  if (iter % coalescing_size == 0)
+  if (is_read_iter())
     read_all();
   set_records();
   iter++;
+}
+
+bool lmdbio::db::is_read_iter() {
+  return iter % coalescing_size == 0;
 }
 
 /* read one or more batches and return number of data records read */

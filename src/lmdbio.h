@@ -228,6 +228,7 @@ public:
   int get_num_records(void);
   record* get_record(int i);
   bool is_reader();
+  bool is_read_iter();
 
   /* Python binding methods */
   void py_init(const char *fname, int batch_size,
