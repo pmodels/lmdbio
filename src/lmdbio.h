@@ -222,7 +222,9 @@ public:
   }
 
   int get_batch_size(void);
-  int read_record_batch(void);
+  void read_record_batch(void);
+  int read_bulk(int bulk_read_num_batches, const int** bulk_sizes,
+      const void** bulk_bytes, const long long int** bulk_offsets);
   int get_num_records(void);
   record* get_record(int i);
   bool is_reader();
@@ -268,7 +270,6 @@ private:
   MPI_Offset* batch_offsets_addr;
   int* send_sizes;
   int* sizes;
-  int total_byte_size;
   int batch_size;
   int subbatch_size;
   int reader_size;
@@ -307,6 +308,7 @@ private:
   int prefetch_count;
   int max_iter;
   int stagger_size;
+  int num_read_batch;
 
   /* params for computing offsets */
   prov_info_t prov_info;
@@ -326,7 +328,8 @@ private:
   void init_read_params(int sample_size);
   int round_up_power_of_two(int num);
   void send_batch();
-  void read_batch();
+  void update_buffer_offsets();
+  void read_all();
   void check_diff_batch();
   bool is_reader(int local_rank);
   void set_records();

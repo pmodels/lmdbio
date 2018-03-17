@@ -150,6 +150,7 @@ void lmdbio::db::init(MPI_Comm parent_comm, const char* fname, int batch_size,
   global_rank = 0;
   iter = 0;
   prefetch_count = 0;
+  num_read_batch = 0;
 
   MPI_Comm_size(MPI_COMM_WORLD, &global_np);
   MPI_Comm_rank(MPI_COMM_WORLD, &global_rank);
@@ -742,158 +743,183 @@ void lmdbio::db::compute_data_offsets(long start_key, long end_key,
   prev_key = end_key + 1;
 }
 
-void lmdbio::db::read_batch() {
-  int bytes, rc, len;
-  ssize_t target_bytes, remaining, rs;
-  char *buff, err[MPI_MAX_ERROR_STRING + 1];
-  MPI_Status status;
-  MPI_Offset *offsets;
-  off_t start_offset, offset;
-  int num_groups, group_no;
-  const int group_size = this->stagger_size;
-  int is_done = 0;
+void lmdbio::db::read_all() {
+  if (is_reader()) {
+    int bytes, rc, len;
+    ssize_t target_bytes, remaining, rs;
+    char *buff, err[MPI_MAX_ERROR_STRING + 1];
+    MPI_Status status;
+    MPI_Offset *offsets;
+    off_t start_offset, offset;
+    int num_groups, group_no;
+    const int group_size = this->stagger_size;
+    int is_done = 0;
 #ifdef BENCHMARK
-  struct rusage rstart, rend;
-  double ttime, utime, stime, sltime, start, end, start_, mpi_io_time;
+    struct rusage rstart, rend;
+    double ttime, utime, stime, sltime, start, end, start_, mpi_io_time;
 
-  start_ = MPI_Wtime();
+    start_ = MPI_Wtime();
 #endif
-  /* wait for the previous group to be done */
-  if (group_size && reader_size > group_size) {
-    num_groups = reader_size / group_size;
-    group_no = reader_id / group_size;
-    printf("reader %d, group size %d, num group %d, group no %d\n",
-        group_size, reader_id, num_groups, group_no);
-    if (group_no != 0) {
-      printf("reader %d, wait for %d to finish reading\n",
-          reader_id, reader_id - group_size);
-      MPI_Recv(&is_done, 1, MPI_INT, reader_id - group_size, 0,
-          reader_comm, MPI_STATUS_IGNORE);
-    }
-  }
-#ifdef BENCHMARK
-  iter_time.recv_notification_time += get_elapsed_time(start_, MPI_Wtime());
-  start = MPI_Wtime();
-  getrusage(RUSAGE_SELF, &rstart);
-  start_ = MPI_Wtime();
-#endif
-  len = 0;
-  /* if provenance info is provided, calculate offsets on the fly;
-   * else get offsets from the array */
-  if (prov_info_mode == prov_info_mode_enum::ENABLE) {
-    long start_key = (fetch_size * reader_size * (iter / prefetch))
-      + (fetch_size * reader_id);
-    long end_key = start_key + fetch_size - 1; /* needed!! */
-    compute_data_offsets(start_key, end_key, &start_offset, &target_bytes);
-  }
-  else {
-    start_offset = batch_offsets[0];
-    target_bytes = batch_offsets[fetch_size - 1] - start_offset
-      + sizes[fetch_size - 1];
-  }
-  if (target_bytes <= 0) {
-    printf("lmdbio: invalid target bytes %zd\n", target_bytes);
-  }
-  assert(target_bytes > 0);
-  iter_time.total_bytes_read += target_bytes;
-#ifdef BENCHMARK
-  iter_time.compute_offset_time += get_elapsed_time(start_, MPI_Wtime());
-#endif
-#if 0
-  remaining = target_bytes;
-  bytes = target_bytes > INT_MAX ? INT_MAX : (int) target_bytes;
-  buff = subbatch_bytes;
-  offsets = batch_offsets;
-#endif
-
-  if ((ssize_t) (win_size * local_np) < target_bytes) {
-    printf("rank %d, bytes overflow, win size %zd, target bytes %zd\n",
-        reader_id, (ssize_t) win_size * local_np, target_bytes);
-  }
-  assert((ssize_t) (win_size * local_np) >= target_bytes);
-
-  /* read data (single_fetch_size * prefetch) from pointers */
-  if (dist_mode == dist_mode_enum::SHMEM) {
-#if 0
-    assert(bytes > 0 && bytes <= INT_MAX);
-    while (remaining != 0) {
-#endif
-#ifdef BENCHMARK
-      start_ = MPI_Wtime();
-#endif
-#if 0
-      rc = MPI_File_read_at(fh, start_offset, buff, bytes, MPI_BYTE,
-          &status);
-#endif
-      /* fixed target bytes */
-      buff = subbatch_bytes;
-      remaining = target_bytes;
-      offset = start_offset;
-      while (remaining) {
-        rs = pread(fd, buff, remaining, offset);
-        assert(rs > 0);
-        offset += rs;
-        buff += rs;
-        remaining -= rs;
-        assert(remaining >= 0);
+    /* wait for the previous group to be done */
+    if (group_size && reader_size > group_size) {
+      num_groups = reader_size / group_size;
+      group_no = reader_id / group_size;
+      printf("reader %d, group size %d, num group %d, group no %d\n",
+          group_size, reader_id, num_groups, group_no);
+      if (group_no != 0) {
+        printf("reader %d, wait for %d to finish reading\n",
+            reader_id, reader_id - group_size);
+        MPI_Recv(&is_done, 1, MPI_INT, reader_id - group_size, 0,
+            reader_comm, MPI_STATUS_IGNORE);
       }
-      assert(remaining == 0);
-#ifdef BENCHMARK
-      mpi_io_time = get_elapsed_time(start_, MPI_Wtime());
-      iter_time.mpi_io_time += mpi_io_time;
-      start_ = MPI_Wtime();
-      //printf("iter %d, read %zu bytes, time %.2f, start offset %lld, end offset %lld\n", iter, target_bytes, mpi_io_time, start_offset, batch_offsets[fetch_size - 1]);
-#endif
-#if 0
-      start_offset += bytes;
-      buff += bytes;
-      remaining -= bytes;
-      bytes = remaining < bytes ? remaining : bytes;
-      if (rc) {
-        MPI_Error_string(rc, err, &len);
-        printf("lmdbio: offset %lld\n", start_offset);
-        printf("lmdbio: MPI file read error %s\n", err);
-      }
-      assert(rc == 0);
     }
+#ifdef BENCHMARK
+    iter_time.recv_notification_time += get_elapsed_time(start_, MPI_Wtime());
+    start = MPI_Wtime();
+    getrusage(RUSAGE_SELF, &rstart);
+    start_ = MPI_Wtime();
 #endif
-
-    if (prov_info_mode != prov_info_mode_enum::ENABLE) {
+    len = 0;
+    /* if provenance info is provided, calculate offsets on the fly;
+     * else get offsets from the array */
+    if (prov_info_mode == prov_info_mode_enum::ENABLE) {
+      long start_key = (fetch_size * reader_size * (iter/ prefetch))
+        + (fetch_size * reader_id);
+      long end_key = start_key + fetch_size - 1; /* needed!! */
+      compute_data_offsets(start_key, end_key, &start_offset, &target_bytes);
+    }
+    else {
       start_offset = batch_offsets[0];
-      for (int i = 0; i < fetch_size; i++) {
-        batch_offsets[i] -= start_offset;
-        //printf("item %d, subbatch offset %lld\n", i, batch_offsets[i]);
+      target_bytes = batch_offsets[fetch_size - 1] - start_offset
+        + sizes[fetch_size - 1];
+    }
+    if (target_bytes <= 0) {
+      printf("lmdbio: invalid target bytes %zd\n", target_bytes);
+    }
+    assert(target_bytes > 0);
+    iter_time.total_bytes_read += target_bytes;
+#ifdef BENCHMARK
+    iter_time.compute_offset_time += get_elapsed_time(start_, MPI_Wtime());
+#endif
+#if 0
+    remaining = target_bytes;
+    bytes = target_bytes > INT_MAX ? INT_MAX : (int) target_bytes;
+    buff = subbatch_bytes;
+    offsets = batch_offsets;
+#endif
+
+    if ((ssize_t) (win_size * local_np) < target_bytes) {
+      printf("rank %d, bytes overflow, win size %zd, target bytes %zd\n",
+          reader_id, (ssize_t) win_size * local_np, target_bytes);
+    }
+    assert((ssize_t) (win_size * local_np) >= target_bytes);
+
+    /* read data (single_fetch_size * prefetch) from pointers */
+    if (dist_mode == dist_mode_enum::SHMEM) {
+#if 0
+      assert(bytes > 0 && bytes <= INT_MAX);
+      while (remaining != 0) {
+#endif
+#ifdef BENCHMARK
+        start_ = MPI_Wtime();
+#endif
+#if 0
+        rc = MPI_File_read_at(fh, start_offset, buff, bytes, MPI_BYTE,
+            &status);
+#endif
+        /* fixed target bytes */
+        buff = subbatch_bytes;
+        remaining = target_bytes;
+        offset = start_offset;
+        while (remaining) {
+          rs = pread(fd, buff, remaining, offset);
+          assert(rs > 0);
+          offset += rs;
+          buff += rs;
+          remaining -= rs;
+          assert(remaining >= 0);
+        }
+        assert(remaining == 0);
+#ifdef BENCHMARK
+        mpi_io_time = get_elapsed_time(start_, MPI_Wtime());
+        iter_time.mpi_io_time += mpi_io_time;
+        start_ = MPI_Wtime();
+        //printf("iter %d, read %zu bytes, time %.2f, start offset %lld, end offset %lld\n", iter, target_bytes, mpi_io_time, start_offset, batch_offsets[fetch_size - 1]);
+#endif
+#if 0
+        start_offset += bytes;
+        buff += bytes;
+        remaining -= bytes;
+        bytes = remaining < bytes ? remaining : bytes;
+        if (rc) {
+          MPI_Error_string(rc, err, &len);
+          printf("lmdbio: offset %lld\n", start_offset);
+          printf("lmdbio: MPI file read error %s\n", err);
+        }
+        assert(rc == 0);
+      }
+#endif
+
+      if (prov_info_mode != prov_info_mode_enum::ENABLE) {
+        start_offset = batch_offsets[0];
+        for (int i = 0; i < fetch_size; i++) {
+          batch_offsets[i] -= start_offset;
+          //printf("item %d, subbatch offset %lld\n", i, batch_offsets[i]);
+        }
       }
     }
-  }
 
-  //printf("lmdbio: done parsing batch\n");
+    //printf("lmdbio: done parsing batch\n");
 
 #ifdef BENCHMARK
-  iter_time.adjust_offset_time += get_elapsed_time(start_, MPI_Wtime());
-  getrusage(RUSAGE_SELF, &rend);
-  end = MPI_Wtime();
-  ttime = get_elapsed_time(start, end);
-  utime = get_utime(rstart, rend);
-  stime = get_stime(rstart, rend);
-  sltime = get_sltime(ttime, utime, stime);
-  parse_stat.add_stat(get_ctx_switches(rstart, rend), 
-      get_inv_ctx_switches(rstart, rend),
-      ttime, utime, stime, sltime);
-  start_ = MPI_Wtime();
+    iter_time.adjust_offset_time += get_elapsed_time(start_, MPI_Wtime());
+    getrusage(RUSAGE_SELF, &rend);
+    end = MPI_Wtime();
+    ttime = get_elapsed_time(start, end);
+    utime = get_utime(rstart, rend);
+    stime = get_stime(rstart, rend);
+    sltime = get_sltime(ttime, utime, stime);
+    parse_stat.add_stat(get_ctx_switches(rstart, rend), 
+        get_inv_ctx_switches(rstart, rend),
+        ttime, utime, stime, sltime);
+    start_ = MPI_Wtime();
 #endif
-  /* notify the next group that the read is done */
-  if (stagger_size && reader_size > group_size) {
-    if (group_no != num_groups - 1) {
-      is_done = 1;
-      printf("reader %d, notify %d that its read has finished reading\n",
-          reader_id, reader_id + group_size);
-      MPI_Send(&is_done, 1, MPI_INT, reader_id + group_size, 0,
-          reader_comm);
+    /* notify the next group that the read is done */
+    if (stagger_size && reader_size > group_size) {
+      if (group_no != num_groups - 1) {
+        is_done = 1;
+        printf("reader %d, notify %d that its read has finished reading\n",
+            reader_id, reader_id + group_size);
+        MPI_Send(&is_done, 1, MPI_INT, reader_id + group_size, 0,
+            reader_comm);
+      }
     }
+#ifdef BENCHMARK
+    iter_time.send_notification_time += get_elapsed_time(start_, MPI_Wtime());
+#endif
   }
 #ifdef BENCHMARK
-  iter_time.send_notification_time += get_elapsed_time(start_, MPI_Wtime());
+  double start = MPI_Wtime();
+#endif
+  MPI_Barrier(MPI_COMM_WORLD);
+#ifdef BENCHMARK
+  iter_time.barrier_time += get_elapsed_time(start, MPI_Wtime());
+  start = MPI_Wtime();
+#endif
+  /* local barrier */
+  if (dist_mode == dist_mode_enum::SHMEM) {
+    MPI_Win_sync(batch_win);
+    if (prov_info_mode != prov_info_mode_enum::ENABLE)
+      MPI_Win_sync(size_win);
+    MPI_Win_sync(batch_offset_win);
+    MPI_Barrier(get_io_comm());
+    MPI_Win_sync(batch_win);
+    if (prov_info_mode != prov_info_mode_enum::ENABLE)
+      MPI_Win_sync(size_win);
+    MPI_Win_sync(batch_offset_win);
+  }
+#ifdef BENCHMARK
+  iter_time.local_barrier_time += get_elapsed_time(start, MPI_Wtime());
 #endif
 }
 
@@ -929,43 +955,15 @@ void lmdbio::db::send_batch() {
 
 /* set records */
 void lmdbio::db::set_records() {
-  int size, size_offset;
+  int size;
   MPI_Offset offset;
 #ifdef BENCHMARK
-  double start;
-  start = MPI_Wtime();
+  double start = MPI_Wtime();
 #endif
-  if (dist_mode == dist_mode_enum::SHMEM && iter % prefetch == 0) {
-    MPI_Win_sync(batch_win);
-    if (prov_info_mode != prov_info_mode_enum::ENABLE)
-      MPI_Win_sync(size_win);
-    MPI_Win_sync(batch_offset_win);
-    MPI_Barrier(get_io_comm());
-    MPI_Win_sync(batch_win);
-    if (prov_info_mode != prov_info_mode_enum::ENABLE)
-      MPI_Win_sync(size_win);
-    MPI_Win_sync(batch_offset_win);
-  }
-#ifdef BENCHMARK
-  iter_time.local_barrier_time += get_elapsed_time(start, MPI_Wtime());
-  start = MPI_Wtime();
-#endif
-  if (prov_info_mode != prov_info_mode_enum::ENABLE) {
-    size_offset = prefetch == 1 || (iter + 1) % prefetch == 0 ?
-      subbatch_size * ((prefetch * (local_np - 1)) + 1) : subbatch_size;
-  }
   for (int i = 0; i < subbatch_size; i++) {
     size = prov_info_mode == prov_info_mode_enum::ENABLE ? prov_info.max_data_size
       : sizes[i];
     records[i].set_record(subbatch_bytes + batch_offsets[i], size);
-  }
-  /* update size offset */
-  if (prov_info_mode == prov_info_mode_enum::ENABLE) {
-    batch_offsets += subbatch_size;
-  }
-  else {
-    sizes += size_offset;
-    batch_offsets += size_offset;
   }
 #ifdef BENCHMARK
  iter_time.set_record_time += get_elapsed_time(start, MPI_Wtime());
@@ -1038,31 +1036,45 @@ bool lmdbio::db::is_reader() {
   return is_reader(local_rank);
 }
 
-int lmdbio::db::read_record_batch(void) 
-{
-  if (global_rank == 0)
-    printf("rank %d, read record batch iter %d\n", global_rank, iter);
-  if (iter % prefetch == 0) {
-    /* reset batch offset pointer */
-    if (prov_info_mode == prov_info_mode_enum::ENABLE) {
-        batch_offsets = batch_offsets_addr;
-    }
-    if (is_reader()) {
-      read_batch();
-    }
-#ifdef BENCHMARK
-    double start;
-    start = MPI_Wtime();
-#endif
-    MPI_Barrier(MPI_COMM_WORLD);
-#ifdef BENCHMARK
-    iter_time.barrier_time += get_elapsed_time(start, MPI_Wtime());
-#endif
+void lmdbio::db::update_buffer_offsets() {
+  /* update size offset */
+  if (prov_info_mode == prov_info_mode_enum::ENABLE) {
+    if (iter % prefetch == 0)
+      batch_offsets = batch_offsets_addr;
+    else
+      batch_offsets += subbatch_size;
   }
-  //printf("lmdbio: iter %d\n", iter);
+  else {
+    int size_offset = (iter == 0) ? 0 : (prefetch == 1 || iter % prefetch == 0 ?
+        subbatch_size * ((prefetch * (local_np - 1)) + 1) : subbatch_size);
+    sizes += size_offset;
+    batch_offsets += size_offset;
+  }
+}
+
+/* read one batch of data and set records */
+void lmdbio::db::read_record_batch(void) {
+  update_buffer_offsets();
+  if (iter % prefetch == 0)
+    read_all();
   set_records();
   iter++;
-  return 0;
+}
+
+/* read one or more batches and return number of data records read */
+int lmdbio::db::read_bulk(int bulk_read_num_batches, const int** bulk_sizes,
+    const void** bulk_bytes, const long long int** bulk_offsets) {
+  update_buffer_offsets();
+  *bulk_sizes = sizes;
+  *bulk_bytes = (void*)(subbatch_bytes);
+  *bulk_offsets = batch_offsets;
+  if (!num_read_batch) {
+    read_all();
+    num_read_batch = prefetch;
+  }
+  num_read_batch -= bulk_read_num_batches;
+  iter += bulk_read_num_batches;
+  return bulk_read_num_batches * subbatch_size;
 }
 
 int lmdbio::db::get_batch_size() {
