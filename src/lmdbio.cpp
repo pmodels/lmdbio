@@ -29,31 +29,31 @@ char* lmdb_me_fmap;
 
 int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 {
-    num_page_faults++;
-    printf("lmdbio: got a SIGSEGV at %p, num_page_faults %llu\n",
-        __sig->si_addr,
-        num_page_faults);
+  num_page_faults++;
+  printf("lmdbio: got a SIGSEGV at %p, num_page_faults %llu\n",
+      __sig->si_addr,
+      num_page_faults);
 
-    /* set the page to be accessible again */
-    printf("lmdbio: unprotecting page %p, %d bytes\n",
+  /* set the page to be accessible again */
+  printf("lmdbio: unprotecting page %p, %d bytes\n",
+      GET_PAGE(__sig->si_addr),
+      getpagesize());
+  if (GET_PAGE(__sig->si_addr) == __sig->si_addr)
+    mprotect(GET_PAGE(__sig->si_addr), getpagesize(), PROT_READ);
+  else
+    mprotect(
         GET_PAGE(__sig->si_addr),
-        getpagesize());
-    if (GET_PAGE(__sig->si_addr) == __sig->si_addr)
-        mprotect(GET_PAGE(__sig->si_addr), getpagesize(), PROT_READ);
-    else
-        mprotect(
-            GET_PAGE(__sig->si_addr),
-            getpagesize(),
-            PROT_READ | PROT_EXEC);
+        getpagesize(),
+        PROT_READ | PROT_EXEC);
 
-    return 0;
+  return 0;
 }
 
 int lmdb_fault_handler(int dummy1, siginfo_t *__sig, void *dummy2)
 {
   char* fault_addr = GET_PAGE(__sig->si_addr);
   /*printf("lmdbio: FAULT at %p, for 4096 -------\n",
-      fault_addr);*/
+    fault_addr);*/
   size_t offset = (size_t) (fault_addr - lmdb_me_map);
   mprotect(fault_addr, getpagesize(), PROT_READ | PROT_WRITE);
   memcpy(fault_addr, lmdb_me_fmap + offset, getpagesize());
@@ -151,7 +151,7 @@ void lmdbio::db::init(
 
   this->local_reader_size = 0;
   this->coalescing_size = coalescing_size;
-  
+
   assign_readers(fname, batch_size);
   bytes_read = 0;
 
@@ -177,7 +177,7 @@ void lmdbio::db::init_read_params(int sample_size) {
   num_read_pages = (sample_size * fetch_size) / PAGE_SIZE;
 
   /* calculate coalescing_size */
-  coalescing_size = coalescing_size ? coalescing_size:
+  coalescing_size = coalescing_size ? coalescing_size :
     ceil((float) OPT_READ_CHUNK / (num_read_pages * getpagesize()));
   coalescing_size = round_up_power_of_two(coalescing_size);
   coalescing_size = coalescing_size > max_iter ? max_iter : coalescing_size;
@@ -274,9 +274,9 @@ void lmdbio::db::lmdb_seq_seek() {
       send_batch_offsets[i] = (char*) lmdb_value_data() - lmdb_buffer;
       send_sizes[i] = lmdb_value_size();
       /*printf("lmdbio: read item %d size %d at %p\n",
-          i,
-          send_sizes[i],
-          send_batch_offsets[i]);*/
+        i,
+        send_sizes[i],
+        send_batch_offsets[i]);*/
       lmdb_next();
     }
   }
@@ -318,7 +318,6 @@ void lmdbio::db::lmdb_seq_seek() {
     = get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
-
 
   /* free buffers and derived data types */
   if (reader_id == 0) {
@@ -811,7 +810,7 @@ void lmdbio::db::read_all() {
         ", group size " << group_size <<
         ", num group " << num_groups <<
         ", group no " << group_no << endl;
-        if (group_no != 0) {
+      if (group_no != 0) {
         cout << "lmdbio: reader " << reader_id <<
           ", wait for " << (reader_id - group_size) <<
           " to finish reading" << endl;
@@ -867,25 +866,25 @@ void lmdbio::db::read_all() {
     /* read data (single_fetch_size * coalescing_size) from pointers */
     if (dist_mode == dist_mode_enum::SHMEM) {
 #ifdef BENCHMARK
-        start_ = MPI_Wtime();
+      start_ = MPI_Wtime();
 #endif
-        /* fixed target bytes */
-        buff = subbatch_bytes;
-        remaining = target_bytes;
-        offset = start_offset;
-        while (remaining) {
-          rs = pread(fd, buff, remaining, offset);
-          assert(rs > 0);
-          offset += rs;
-          buff += rs;
-          remaining -= rs;
-          assert(remaining >= 0);
-        }
-        assert(remaining == 0);
+      /* fixed target bytes */
+      buff = subbatch_bytes;
+      remaining = target_bytes;
+      offset = start_offset;
+      while (remaining) {
+        rs = pread(fd, buff, remaining, offset);
+        assert(rs > 0);
+        offset += rs;
+        buff += rs;
+        remaining -= rs;
+        assert(remaining >= 0);
+      }
+      assert(remaining == 0);
 #ifdef BENCHMARK
-        mpi_io_time = get_elapsed_time(start_, MPI_Wtime());
-        iter_time.mpi_io_time += mpi_io_time;
-        start_ = MPI_Wtime();
+      mpi_io_time = get_elapsed_time(start_, MPI_Wtime());
+      iter_time.mpi_io_time += mpi_io_time;
+      start_ = MPI_Wtime();
 #endif
       if (prov_info_mode != prov_info_mode_enum::ENABLE) {
         start_offset = batch_offsets[0];
@@ -1019,7 +1018,7 @@ void lmdbio::db::set_records() {
     records[i].set_record(subbatch_bytes + batch_offsets[i], size);
   }
 #ifdef BENCHMARK
- iter_time.set_record_time += get_elapsed_time(start, MPI_Wtime());
+  iter_time.set_record_time += get_elapsed_time(start, MPI_Wtime());
 #endif
 }
 
@@ -1071,9 +1070,9 @@ void lmdbio::db::lmdb_touch_pages() {
   /*cout << "lmdbio: touching data from page " << start_pg <<
     " to " << (start_pg + read_pages) << endl;*/
   for (size_t i = start_pg; i < start_pg + read_pages; i++) {
-      //cout << "lmdbio: touching page " << i << endl;
-      //for (size_t j = 0; j < PAGE_SIZE; j++)
-      tmp += lmdb_buffer[PAGE_SIZE * i];
+    //cout << "lmdbio: touching page " << i << endl;
+    //for (size_t j = 0; j < PAGE_SIZE; j++)
+    tmp += lmdb_buffer[PAGE_SIZE * i];
   }
   //cout << "lmdbio: done touching pages" << endl;
 }
@@ -1101,8 +1100,8 @@ void lmdbio::db::update_buffer_offsets() {
   else {
     int size_offset = (iter == 0) ?
       0 : (coalescing_size == 1 || is_read_iter() ?
-        subbatch_size * ((coalescing_size * (local_np - 1)) + 1) :
-        subbatch_size);
+          subbatch_size * ((coalescing_size * (local_np - 1)) + 1) :
+          subbatch_size);
     sizes += size_offset;
     batch_offsets += size_offset;
   }
