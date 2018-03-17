@@ -54,8 +54,7 @@ public:
   int get_record_size() { return record_size; }
   void *get_record() { return data; }
   void set_record(void* data, int record_size) {
-    string str = string(static_cast<const char*>(data),
-        record_size);
+    string str = string(static_cast<const char*>(data), record_size);
     this->data = data;
     this->record_size = record_size;
   }

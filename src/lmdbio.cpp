@@ -34,11 +34,16 @@ int sigsegv_handler(int dummy1, siginfo_t *__sig, void *dummy2)
            num_page_faults);
 
     /* set the page to be accessible again */
-    printf("unprotecting page %p, %d bytes\n", GET_PAGE(__sig->si_addr), getpagesize());
+    printf("unprotecting page %p, %d bytes\n",
+        GET_PAGE(__sig->si_addr),
+        getpagesize());
     if (GET_PAGE(__sig->si_addr) == __sig->si_addr)
         mprotect(GET_PAGE(__sig->si_addr), getpagesize(), PROT_READ);
     else
-        mprotect(GET_PAGE(__sig->si_addr), getpagesize(), PROT_READ | PROT_EXEC);
+        mprotect(
+            GET_PAGE(__sig->si_addr),
+            getpagesize(),
+            PROT_READ | PROT_EXEC);
 
     return 0;
 }
@@ -227,20 +232,31 @@ void lmdbio::db::lmdb_seq_seek() {
   /* a derived datatype for sizes */
   MPI_Type_vector(blockcount, blocklen, stride, MPI_INT, &size_vec_type);
   MPI_Type_commit(&size_vec_type);
-  MPI_Type_create_resized(size_vec_type, 0, blocklen * sizeof(int),
+  MPI_Type_create_resized(
+      size_vec_type,
+      0,
+      blocklen * sizeof(int),
       &size_type);
   MPI_Type_commit(&size_type);
 
   /* a derived datatype for batch ptrs */
-  MPI_Type_vector(blockcount, blocklen * sizeof(MPI_Offset),
-      stride * sizeof(MPI_Offset), MPI_BYTE, &batch_offset_vec_type);
+  MPI_Type_vector(
+      blockcount,
+      blocklen * sizeof(MPI_Offset),
+      stride * sizeof(MPI_Offset),
+      MPI_BYTE,
+      &batch_offset_vec_type);
   MPI_Type_commit(&batch_offset_vec_type);
-  MPI_Type_create_resized(batch_offset_vec_type, 0, blocklen * sizeof(MPI_Offset),
+  MPI_Type_create_resized(
+      batch_offset_vec_type,
+      0,
+      blocklen * sizeof(MPI_Offset),
       &batch_offset_type);
   MPI_Type_commit(&batch_offset_type);
 
 #ifdef BENCHMARK
-  init_time.seq_seek_create_datatype_time = get_elapsed_time(start, MPI_Wtime());
+  init_time.seq_seek_create_datatype_time =
+    get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
 
@@ -264,8 +280,15 @@ void lmdbio::db::lmdb_seq_seek() {
 #endif
 
   /* distribute sizes */
-  MPI_Scatter(send_sizes, 1, size_type, sizes, recv_buff_size,
-      MPI_INT, 0, reader_comm);
+  MPI_Scatter(
+      send_sizes,
+      1,
+      size_type,
+      sizes,
+      recv_buff_size,
+      MPI_INT,
+      0,
+      reader_comm);
 
 #ifdef BENCHMARK
   init_time.seq_seek_send_sizes_time = get_elapsed_time(start, MPI_Wtime());
@@ -273,11 +296,19 @@ void lmdbio::db::lmdb_seq_seek() {
 #endif
 
   /* distribute batch ptrs */
-  MPI_Scatter(send_batch_offsets, 1, batch_offset_type, batch_offsets,
-      recv_buff_size * sizeof(MPI_Offset), MPI_BYTE, 0, reader_comm);
+  MPI_Scatter(
+      send_batch_offsets,
+      1,
+      batch_offset_type,
+      batch_offsets,
+      recv_buff_size * sizeof(MPI_Offset),
+      MPI_BYTE,
+      0,
+      reader_comm);
 
 #ifdef BENCHMARK
-  init_time.seq_seek_send_batch_ptrs_time = get_elapsed_time(start, MPI_Wtime());
+  init_time.seq_seek_send_batch_ptrs_time
+    = get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
 
@@ -316,8 +347,12 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 
   /* communicator between processes within a node */
   local_comm = MPI_COMM_NULL;
-  MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, global_rank,
-      MPI_INFO_NULL, &local_comm);
+  MPI_Comm_split_type(
+      MPI_COMM_WORLD,
+      MPI_COMM_TYPE_SHARED,
+      global_rank,
+      MPI_INFO_NULL,
+      &local_comm);
   assert(local_comm != MPI_COMM_NULL);
   MPI_Comm_size(local_comm, &local_np);
   MPI_Comm_rank(local_comm, &local_rank);
@@ -327,7 +362,8 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   MPI_Allreduce(&is_rank_0, &node_size, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
   /* get a number of readers */
-  reader_size = reader_size && reader_size >= node_size ? reader_size : node_size;
+  reader_size = reader_size && reader_size >= node_size ?
+    reader_size : node_size;
 
   /* get a number of readers within a node */
   local_reader_size = reader_size / node_size;
@@ -369,7 +405,8 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
       " on host " << hostname << endl;
   }
 #ifdef BENCHMARK
-  init_time.assign_readers_manage_comms_time = get_elapsed_time(start, MPI_Wtime());
+  init_time.assign_readers_manage_comms_time =
+    get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
 
@@ -377,7 +414,8 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   MPI_Barrier(MPI_COMM_WORLD);
 
 #ifdef BENCHMARK
-  init_time.assign_readers_open_db_barrier_time = get_elapsed_time(start, MPI_Wtime());
+  init_time.assign_readers_open_db_barrier_time =
+    get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
 
@@ -391,14 +429,16 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   }
 
 #ifdef BENCHMARK
-  init_time.assign_readers_open_db_time = get_elapsed_time(start, MPI_Wtime());
+  init_time.assign_readers_open_db_time =
+    get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
 
   MPI_Barrier(MPI_COMM_WORLD);
 
 #ifdef BENCHMARK
-  init_time.assign_readers_after_opening_db_barrier_time = get_elapsed_time(start, MPI_Wtime());
+  init_time.assign_readers_after_opening_db_barrier_time =
+    get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
 
@@ -420,7 +460,12 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   init_read_params(size);
 
   /* calculate win size - 2x larger than the estimated size */
-  this->win_size = (MPI_Aint) subbatch_size * (MPI_Aint) coalescing_size * (MPI_Aint) size * (MPI_Aint) 2 * (MPI_Aint) sizeof(char);
+  this->win_size =
+    (MPI_Aint) subbatch_size *
+    (MPI_Aint) coalescing_size *
+    (MPI_Aint) size *
+    (MPI_Aint) 2 *
+    (MPI_Aint) sizeof(char);
   assert(win_size > 0);
 
   if (prov_info_mode == prov_info_mode_enum::ENABLE) {
@@ -436,24 +481,40 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
     MPI_Comm io_comm = get_io_comm();
     /* allocate a shared buffer for sizes */
     if (prov_info_mode != prov_info_mode_enum::ENABLE) {
-      MPI_Win_allocate_shared(size_win_size * sizeof(int), sizeof(int),
-          MPI_INFO_NULL, io_comm, &sizes, &size_win);
+      MPI_Win_allocate_shared(
+          size_win_size * sizeof(int),
+          sizeof(int),
+          MPI_INFO_NULL,
+          io_comm,
+          &sizes,
+          &size_win);
       MPI_Win_lock_all(MPI_MODE_NOCHECK, size_win);
     }
     /* allocate a shared offset buffer */
-    MPI_Win_allocate_shared(size_win_size * sizeof(MPI_Offset), sizeof(MPI_Offset),
-          MPI_INFO_NULL, io_comm, &batch_offsets, &batch_offset_win);
+    MPI_Win_allocate_shared(
+        size_win_size * sizeof(MPI_Offset),
+        sizeof(MPI_Offset),
+        MPI_INFO_NULL,
+        io_comm,
+        &batch_offsets,
+        &batch_offset_win);
     MPI_Win_lock_all(MPI_MODE_NOCHECK, batch_offset_win);
     /* allocate a shared buffer for samples */
-    MPI_Win_allocate_shared(win_size, sizeof(char), MPI_INFO_NULL, io_comm,
-        &subbatch_bytes, &batch_win);
+    MPI_Win_allocate_shared(
+        win_size,
+        sizeof(char),
+        MPI_INFO_NULL,
+        io_comm,
+        &subbatch_bytes,
+        &batch_win);
     MPI_Win_lock_all(MPI_MODE_NOCHECK, batch_win);
   }
 
   /* allocate record's array */
   this->records = new (std::nothrow) record[subbatch_size];
 #ifdef BENCHMARK
-  init_time.assign_readers_create_buffs_time = get_elapsed_time(start, MPI_Wtime());
+  init_time.assign_readers_create_buffs_time =
+    get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
 
@@ -474,13 +535,15 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   }
   else {
     sizes += ((subbatch_size * coalescing_size) - size_win_size) * local_rank;
-    batch_offsets += ((subbatch_size * coalescing_size) - size_win_size) * local_rank;
+    batch_offsets += ((subbatch_size * coalescing_size) - size_win_size) *
+      local_rank;
   }
   /* reset subbatch bytes ptr to zero */
   subbatch_bytes -= (win_size / sizeof(char)) * local_rank;
 
 #ifdef BENCHMARK
-  init_time.assign_readers_adjust_ptrs_time = get_elapsed_time(start, MPI_Wtime());
+  init_time.assign_readers_adjust_ptrs_time =
+    get_elapsed_time(start, MPI_Wtime());
 #endif
 }
 
@@ -501,7 +564,9 @@ void lmdbio::db::open_db(const char* fname) {
 #endif
     srand(time(NULL));
     check_lmdb(mdb_env_create(&mdb_env_), "Created environment", false);
-    check_lmdb(mdb_env_set_maxreaders(mdb_env_, reader_size), "Set maxreaders",
+    check_lmdb(
+        mdb_env_set_maxreaders(mdb_env_, reader_size),
+        "Set maxreaders",
         false);
 #ifdef DIRECTIO
   }
@@ -509,10 +574,10 @@ void lmdbio::db::open_db(const char* fname) {
 
   char *e = getenv("ENABLE_MPROTECT");
   if (e && !strcmp(e, "1")) {
-      __sig.sa_sigaction = (void (*) (int, siginfo_t *, void *))
-          sigsegv_handler;
-      __sig.sa_flags = SA_SIGINFO;
-      sigaction(SIGSEGV, &__sig, 0);
+    __sig.sa_sigaction =
+      (void (*) (int, siginfo_t *, void *)) sigsegv_handler;
+    __sig.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &__sig, 0);
   }
 
 #ifdef ICPADS
@@ -575,12 +640,18 @@ void lmdbio::db::open_db(const char* fname) {
 #ifdef DIRECTIO
   if (global_rank == 0 && prov_info_mode != prov_info_mode_enum::ENABLE) {
 #endif
-    check_lmdb(mdb_txn_begin(mdb_env_, NULL, MDB_RDONLY, &mdb_txn),
-        "Begun transaction", false);
-    check_lmdb(mdb_dbi_open(mdb_txn, NULL, 0, &mdb_dbi_),
-        "Opened database", false);
-    check_lmdb(mdb_cursor_open(mdb_txn, mdb_dbi_, &mdb_cursor),
-        "Opened cursor", false);
+    check_lmdb(
+        mdb_txn_begin(mdb_env_, NULL, MDB_RDONLY, &mdb_txn),
+        "Begun transaction",
+        false);
+    check_lmdb(
+        mdb_dbi_open(mdb_txn, NULL, 0, &mdb_dbi_),
+        "Opened database",
+        false);
+    check_lmdb(
+        mdb_cursor_open(mdb_txn, mdb_dbi_, &mdb_cursor),
+        "Opened cursor",
+        false);
     lmdb_init_cursor();
 #ifdef DIRECTIO
   }
@@ -646,8 +717,9 @@ void lmdbio::db::compute_data_offsets(
 
       /* compute number of pages used to store free nodes info */
       if (i > prov_info.commit_iter)
-        freelist_count = ceil((double) ((commit_freenode_count + 1) * sizeof(size_t))
-            / page_size);
+        freelist_count =
+          ceil((double) ((commit_freenode_count + 1) * sizeof(size_t)) /
+              page_size);
 
 
       /* compute number of new added nodes based on the number of free nodes */
@@ -731,8 +803,14 @@ void lmdbio::db::read_all() {
       if (group_no != 0) {
         printf("reader %d, wait for %d to finish reading\n",
             reader_id, reader_id - group_size);
-        MPI_Recv(&is_done, 1, MPI_INT, reader_id - group_size, 0,
-            reader_comm, MPI_STATUS_IGNORE);
+        MPI_Recv(
+            &is_done,
+            1,
+            MPI_INT,
+            reader_id - group_size,
+            0,
+            reader_comm,
+            MPI_STATUS_IGNORE);
       }
     }
 #ifdef BENCHMARK
@@ -745,15 +823,18 @@ void lmdbio::db::read_all() {
     /* if provenance info is provided, calculate offsets on the fly;
      * else get offsets from the array */
     if (prov_info_mode == prov_info_mode_enum::ENABLE) {
-      long start_key = (fetch_size * reader_size * (iter/ coalescing_size))
-        + (fetch_size * reader_id);
+      long start_key =
+        (fetch_size * reader_size * (iter/ coalescing_size)) +
+        (fetch_size * reader_id);
       long end_key = start_key + fetch_size - 1; /* needed!! */
       compute_data_offsets(start_key, end_key, &start_offset, &target_bytes);
     }
     else {
       start_offset = batch_offsets[0];
-      target_bytes = batch_offsets[fetch_size - 1] - start_offset
-        + sizes[fetch_size - 1];
+      target_bytes =
+        batch_offsets[fetch_size - 1] -
+        start_offset +
+        sizes[fetch_size - 1];
     }
     if (target_bytes <= 0) {
       printf("lmdbio: invalid target bytes %zd\n", target_bytes);
@@ -812,9 +893,13 @@ void lmdbio::db::read_all() {
     utime = get_utime(rstart, rend);
     stime = get_stime(rstart, rend);
     sltime = get_sltime(ttime, utime, stime);
-    parse_stat.add_stat(get_ctx_switches(rstart, rend), 
+    parse_stat.add_stat(
+        get_ctx_switches(rstart, rend),
         get_inv_ctx_switches(rstart, rend),
-        ttime, utime, stime, sltime);
+        ttime,
+        utime,
+        stime,
+        sltime);
     start_ = MPI_Wtime();
 #endif
     /* notify the next group that the read is done */
@@ -823,7 +908,12 @@ void lmdbio::db::read_all() {
         is_done = 1;
         printf("reader %d, notify %d that its read has finished reading\n",
             reader_id, reader_id + group_size);
-        MPI_Send(&is_done, 1, MPI_INT, reader_id + group_size, 0,
+        MPI_Send(
+            &is_done,
+            1,
+            MPI_INT,
+            reader_id + group_size,
+            0,
             reader_comm);
       }
     }
@@ -866,8 +956,15 @@ void lmdbio::db::send_batch() {
   MPI_Comm comm = get_io_comm();
   //cout << "send batch " << send_sizes[0] << endl;
   /* send data size */
-  MPI_Scatter(send_sizes, subbatch_size, MPI_INT, sizes, subbatch_size, MPI_INT,
-      0, comm);
+  MPI_Scatter(
+      send_sizes,
+      subbatch_size,
+      MPI_INT,
+      sizes,
+      subbatch_size,
+      MPI_INT,
+      0,
+      comm);
 
   //cout << "scatter size completed" << endl; 
   /* get total size */
@@ -877,8 +974,16 @@ void lmdbio::db::send_batch() {
 
   //cout << "count size completed" << endl;
   /* send sub-batch */
-  MPI_Scatterv(batch_bytes, send_counts, send_displs, MPI_BYTE,
-      subbatch_bytes, count, MPI_BYTE, 0, comm);
+  MPI_Scatterv(
+      batch_bytes,
+      send_counts,
+      send_displs,
+      MPI_BYTE,
+      subbatch_bytes,
+      count,
+      MPI_BYTE,
+      0,
+      comm);
 
   //cout << "scatterv batch completed" << endl;
 #ifdef BENCHMARK
@@ -894,8 +999,8 @@ void lmdbio::db::set_records() {
   double start = MPI_Wtime();
 #endif
   for (int i = 0; i < subbatch_size; i++) {
-    size = prov_info_mode == prov_info_mode_enum::ENABLE ? prov_info.max_data_size
-      : sizes[i];
+    size = prov_info_mode == prov_info_mode_enum::ENABLE ?
+      prov_info.max_data_size : sizes[i];
     records[i].set_record(subbatch_bytes + batch_offsets[i], size);
   }
 #ifdef BENCHMARK
@@ -979,8 +1084,10 @@ void lmdbio::db::update_buffer_offsets() {
       batch_offsets += subbatch_size;
   }
   else {
-    int size_offset = (iter == 0) ? 0 : (coalescing_size == 1 || is_read_iter() ?
-        subbatch_size * ((coalescing_size * (local_np - 1)) + 1) : subbatch_size);
+    int size_offset = (iter == 0) ?
+      0 : (coalescing_size == 1 || is_read_iter() ?
+        subbatch_size * ((coalescing_size * (local_np - 1)) + 1) :
+        subbatch_size);
     sizes += size_offset;
     batch_offsets += size_offset;
   }
