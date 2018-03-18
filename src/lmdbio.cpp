@@ -153,7 +153,6 @@ void lmdbio::db::init(
   this->batch_coalescing_size = batch_coalescing_size;
 
   assign_readers(fname, batch_size);
-  bytes_read = 0;
 
 #ifdef BENCHMARK
   end = MPI_Wtime();
@@ -852,8 +851,8 @@ void lmdbio::db::read_all() {
         endl;
     }
     assert(target_bytes > 0);
-    iter_time.total_bytes_read += target_bytes;
 #ifdef BENCHMARK
+    iter_time.total_bytes_read += target_bytes;
     iter_time.compute_offset_time += get_elapsed_time(start_, MPI_Wtime());
 #endif
     if ((ssize_t) (win_size * local_np) < target_bytes) {
@@ -1198,11 +1197,13 @@ lmdbio::io_stat lmdbio::db::get_parse_stat() {
   return parse_stat;
 }
 
-MPI_Comm lmdbio::db::get_io_comm() {
-  return is_single_reader_per_node ? local_comm : sublocal_comm;
-}
 
 int lmdbio::db::get_io_np() {
   return is_single_reader_per_node ? local_np : sublocal_np;
 }
 #endif
+
+MPI_Comm lmdbio::db::get_io_comm() {
+  return is_single_reader_per_node ? local_comm : sublocal_comm;
+}
+
