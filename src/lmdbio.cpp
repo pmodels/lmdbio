@@ -1125,6 +1125,7 @@ const int lmdbio::db::read_bulk(
     const int** bulk_sizes,
     const void** bulk_bytes,
     const long long int** bulk_offsets) {
+  assert(bulk_read_num_batches <= batch_coalescing_size);
   update_buffer_offsets();
   *bulk_sizes = sizes;
   *bulk_bytes = (void*)(subbatch_bytes);
