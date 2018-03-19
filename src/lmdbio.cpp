@@ -1120,7 +1120,7 @@ bool lmdbio::db::is_read_iter() {
 }
 
 /* read one or more batches and return number of data records read */
-int lmdbio::db::read_bulk(
+const int lmdbio::db::read_bulk(
     int bulk_read_num_batches,
     const int** bulk_sizes,
     const void** bulk_bytes,

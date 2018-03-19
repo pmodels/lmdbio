@@ -239,7 +239,7 @@ public:
 
   int get_batch_size(void);
   void read_record_batch(void);
-  int read_bulk(
+  const int read_bulk(
       int bulk_read_num_batches,
       const int** bulk_sizes,
       const void** bulk_bytes,
