@@ -905,7 +905,7 @@ void lmdbio::db::read_all() {
     utime = get_utime(rstart, rend);
     stime = get_stime(rstart, rend);
     sltime = get_sltime(ttime, utime, stime);
-    parse_stat.add_stat(
+    read_stat.add_stat(
         get_ctx_switches(rstart, rend),
         get_inv_ctx_switches(rstart, rend),
         ttime,
