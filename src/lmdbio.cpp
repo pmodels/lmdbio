@@ -865,34 +865,32 @@ void lmdbio::db::read_all() {
     assert((ssize_t) (win_size * local_np) >= target_bytes);
 
     /* read data (single_fetch_size * batch_coalescing_size) from pointers */
-    if (dist_mode == dist_mode_enum::SHMEM) {
 #ifdef BENCHMARK
-      start_ = MPI_Wtime();
+    start_ = MPI_Wtime();
 #endif
-      /* fixed target bytes */
-      buff = subbatch_bytes;
-      remaining = target_bytes;
-      offset = start_offset;
-      while (remaining) {
-        rs = pread(fd, buff, remaining, offset);
-        assert(rs > 0);
-        offset += rs;
-        buff += rs;
-        remaining -= rs;
-        assert(remaining >= 0);
-      }
-      assert(remaining == 0);
+    /* fixed target bytes */
+    buff = subbatch_bytes;
+    remaining = target_bytes;
+    offset = start_offset;
+    while (remaining) {
+      rs = pread(fd, buff, remaining, offset);
+      assert(rs > 0);
+      offset += rs;
+      buff += rs;
+      remaining -= rs;
+      assert(remaining >= 0);
+    }
+    assert(remaining == 0);
 #ifdef BENCHMARK
     iter_time.io_time += get_elapsed_time(start_, MPI_Wtime());
     start_ = MPI_Wtime();
 #endif
-      if (prov_info_mode != prov_info_mode_enum::ENABLE) {
-        start_offset = batch_offsets[0];
-        for (int i = 0; i < fetch_size; i++) {
-          batch_offsets[i] -= start_offset;
-          /*cout << "lmdbio: item " << i <<
-            ", subbatch offset " << batch_offsets[i] << endl;*/
-        }
+    if (prov_info_mode != prov_info_mode_enum::ENABLE) {
+      start_offset = batch_offsets[0];
+      for (int i = 0; i < fetch_size; i++) {
+        batch_offsets[i] -= start_offset;
+        /*cout << "lmdbio: item " << i <<
+          ", subbatch offset " << batch_offsets[i] << endl;*/
       }
     }
 
