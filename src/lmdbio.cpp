@@ -1196,12 +1196,11 @@ lmdbio::io_stat lmdbio::db::get_read_stat() {
 lmdbio::io_stat lmdbio::db::get_parse_stat() {
   return parse_stat;
 }
-
+#endif
 
 int lmdbio::db::get_io_np() {
   return is_single_reader_per_node ? local_np : sublocal_np;
 }
-#endif
 
 MPI_Comm lmdbio::db::get_io_comm() {
   return is_single_reader_per_node ? local_comm : sublocal_comm;
