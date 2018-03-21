@@ -21,7 +21,8 @@ int main() {
     db->set_mode(
         lmdbio::dist_mode_enum::SHMEM,
         lmdbio::read_mode_enum::STRIDE,
-        lmdbio::prov_info_mode_enum::DISABLE);
+        lmdbio::prov_info_mode_enum::DISABLE,
+        lmdbio::collective_mode_enum::INTRANODE);
     db->set_stagger_size(STAGGERING_SIZE);
     db->init(
         MPI_COMM_WORLD,
