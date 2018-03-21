@@ -450,6 +450,15 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
   start = MPI_Wtime();
 #endif
 
+  if (collective_mode == collective_mode_enum::INTRANODE) {
+    if (is_reader())
+      batch_ptrs = new char*[fetch_size];
+    /* disable prov info and batch coalescing */
+    prov_info_mode = prov_info_mode_enum::DISABLE;
+    batch_coalescing_size = 1;
+    max_iter = 1;
+  }
+
   /* getting data record size */
   if (prov_info_mode == prov_info_mode_enum::ENABLE) {
     size = prov_info.max_data_size;
@@ -464,8 +473,10 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
     MPI_Bcast(&size, 1, MPI_INT, 0, MPI_COMM_WORLD);
   }
 
-  /* init number of read pages, batch_coalescing_size, and fetch size */
-  init_read_params(size);
+  /* init batch_coalescing_size, and fetch size */
+  if (collective_mode == collective_mode_enum::NONE ||
+      collective_mode == collective_mode_enum::INTERNODE)
+    init_read_params(size);
 
   /* calculate win size - 2x larger than the estimated size */
   this->win_size =
@@ -527,27 +538,33 @@ void lmdbio::db::assign_readers(const char* fname, int batch_size) {
 #endif
 
   /* get batch ptrs and sizes */
-  if (is_reader() && prov_info_mode != prov_info_mode_enum::ENABLE)
-    lmdb_seq_seek();
+  if (collective_mode == collective_mode_enum::NONE ||
+      collective_mode == collective_mode_enum::INTERNODE) {
+    if (is_reader() && prov_info_mode != prov_info_mode_enum::ENABLE)
+      lmdb_seq_seek();
+  }
 
 #ifdef BENCHMARK
   init_time.assign_readers_seq_seek_time = get_elapsed_time(start, MPI_Wtime());
   start = MPI_Wtime();
 #endif
 
-  cout << "lmdbio: rank " << local_rank << ", reset size ptrs" << endl;
+  if (collective_mode == collective_mode_enum::NONE ||
+      collective_mode == collective_mode_enum::INTERNODE) {
+    cout << "lmdbio: rank " << local_rank << ", reset size ptrs" << endl;
 
-  /* reset size ptr */
-  if (prov_info_mode == prov_info_mode_enum::ENABLE) {
-    batch_offsets_addr = batch_offsets;
+    /* reset size ptr */
+    if (prov_info_mode == prov_info_mode_enum::ENABLE) {
+      batch_offsets_addr = batch_offsets;
+    }
+    else {
+      sizes += ((subbatch_size * batch_coalescing_size) - size_win_size) * local_rank;
+      batch_offsets += ((subbatch_size * batch_coalescing_size) - size_win_size) *
+        local_rank;
+    }
+    /* reset subbatch bytes ptr to zero */
+    subbatch_bytes -= (win_size / sizeof(char)) * local_rank;
   }
-  else {
-    sizes += ((subbatch_size * batch_coalescing_size) - size_win_size) * local_rank;
-    batch_offsets += ((subbatch_size * batch_coalescing_size) - size_win_size) *
-      local_rank;
-  }
-  /* reset subbatch bytes ptr to zero */
-  subbatch_bytes -= (win_size / sizeof(char)) * local_rank;
 
 #ifdef BENCHMARK
   init_time.assign_readers_adjust_ptrs_time =
@@ -568,7 +585,12 @@ void lmdbio::db::open_db(const char* fname) {
   MDB_envinfo stat;
 
 #ifdef DIRECTIO
-  if (global_rank == 0 && prov_info_mode != prov_info_mode_enum::ENABLE) {
+  bool open_lmdb = collective_mode == collective_mode_enum::INTRANODE ||
+    ((collective_mode == collective_mode_enum::NONE ||
+      collective_mode == collective_mode_enum::INTERNODE) &&
+     global_rank == 0 &&
+     prov_info_mode != prov_info_mode_enum::ENABLE);
+  if (open_lmdb) {
 #endif
     srand(time(NULL));
     check_lmdb(mdb_env_create(&mdb_env_), "Created environment", false);
@@ -631,23 +653,27 @@ void lmdbio::db::open_db(const char* fname) {
   lmdb_buffer = (char*) addr;
   lmdb_me_map = lmdb_buffer;
 #elif DIRECTIO
-  if (global_rank == 0 && prov_info_mode != prov_info_mode_enum::ENABLE) {
+  if (open_lmdb) {
     rc = mdb_env_open(mdb_env_, fname, flags, 0664);
     lmdb_buffer = mdb_get_me_map(mdb_env_);
   }
-  cout << "lmdbio: DIRECT IO mode" << endl;
 
-  char filename[1000];
-  snprintf(filename, 1000, "%s/data.mdb", fname);
+  if (collective_mode == collective_mode_enum::NONE ||
+      collective_mode == collective_mode_enum::INTERNODE) {
+    cout << "lmdbio: DIRECT IO mode" << endl;
 
-  fd = open(filename, O_RDONLY);
+    char filename[1000];
+    snprintf(filename, 1000, "%s/data.mdb", fname);
+
+    fd = open(filename, O_RDONLY);
+  }
 #else
   rc = mdb_env_open(mdb_env_, fname, flags, 0664);
   //cout << "lmdbio: reader " << reader_id << " error code " << rc << endl;
 #endif
 
 #ifdef DIRECTIO
-  if (global_rank == 0 && prov_info_mode != prov_info_mode_enum::ENABLE) {
+  if (open_lmdb) {
 #endif
     check_lmdb(
         mdb_txn_begin(mdb_env_, NULL, MDB_RDONLY, &mdb_txn),
@@ -786,7 +812,80 @@ void lmdbio::db::compute_data_offsets(
   prev_key = end_key + 1;
 }
 
-void lmdbio::db::read_all() {
+void lmdbio::db::read_all_mmap() {
+  if (is_reader()) {
+    int *read_sizes;
+    int size = 0;
+    int id = 0;
+    int count = 0;
+    int offset_count = 0;
+    long total_byte_size = 0;
+#ifdef BENCHMARK
+    struct rusage rstart, rend;
+    double ttime, utime, stime, sltime, start, end, start_;
+
+    start = MPI_Wtime();
+    getrusage(RUSAGE_SELF, &rstart);
+    start_ = MPI_Wtime();
+#endif
+    count = 0;
+    total_byte_size = 0;
+    read_sizes = this->sizes;
+    lmdb_get_current();
+    for (int i = 0; i < fetch_size; i++) {
+      size = lmdb_value_size();
+      batch_ptrs[i] = (char*) lmdb_value_data();
+      //cout << "lmdbio: reader " << reader_id << ", read " << key() << endl;
+      read_sizes[i] = size;
+      total_byte_size += size;
+      lmdb_next();
+    }
+#ifdef BENCHMARK
+    iter_time.access_time += get_elapsed_time(start_, MPI_Wtime());
+    start_ = MPI_Wtime();
+#endif
+    /* determine if the data is larger than a buffer */
+    assert(total_byte_size <= win_size * get_io_np());
+
+    /* move a cursor to the next location */
+    if (read_mode == read_mode_enum::STRIDE && global_np != 1)
+      lmdb_next_fetch();
+#ifdef BENCHMARK
+    iter_time.mdb_seek_time += get_elapsed_time(start_, MPI_Wtime());
+    start_ = MPI_Wtime();
+#endif
+    count = 0;
+    offset_count = 0;
+    for (int i = 0; i < fetch_size; i++) {
+      size = read_sizes[i];
+      if (i % subbatch_size == 0) {
+        count = (i / subbatch_size) * win_size;
+        offset_count = 0;
+      }
+      memcpy(subbatch_bytes + count, batch_ptrs[i], size);
+      batch_offsets[i] = offset_count;
+      count += size;
+      offset_count += size;
+    }
+#ifdef BENCHMARK
+    iter_time.io_time += get_elapsed_time(start_, MPI_Wtime());
+
+    getrusage(RUSAGE_SELF, &rend);
+    end = MPI_Wtime();
+    ttime = get_elapsed_time(start, end);
+    utime = get_utime(rstart, rend);
+    stime = get_stime(rstart, rend);
+    sltime = get_sltime(ttime, utime, stime);
+    read_stat.add_stat(get_ctx_switches(rstart, rend),
+        get_inv_ctx_switches(rstart, rend),
+        ttime, utime, stime, sltime);
+#endif
+  }
+  io_barrier();
+}
+
+void lmdbio::db::read_all_dio() {
+  cout << "lmdbio: read_all_dio" << endl;
   if (is_reader()) {
     int bytes, rc, len;
     ssize_t target_bytes, remaining, rs;
@@ -933,6 +1032,10 @@ void lmdbio::db::read_all() {
     iter_time.send_notification_time += get_elapsed_time(start_, MPI_Wtime());
 #endif
   }
+  io_barrier();
+}
+
+void lmdbio::db::io_barrier() {
 #ifdef BENCHMARK
   double start = MPI_Wtime();
 #endif
@@ -1047,7 +1150,8 @@ void lmdbio::db::set_prov_info(prov_info_t prov_info) {
 void lmdbio::db::set_mode(
     lmdbio::dist_mode_enum dist_mode,
     lmdbio::read_mode_enum read_mode,
-    lmdbio::prov_info_mode_enum prov_info_mode) {
+    lmdbio::prov_info_mode_enum prov_info_mode,
+    lmdbio::collective_mode_enum collective_mode) {
   if (dist_mode == dist_mode_enum::SHMEM)
     cout << "lmdbio: set dist mode to SHMEM" << endl;
   if (read_mode == read_mode_enum::STRIDE)
@@ -1058,10 +1162,17 @@ void lmdbio::db::set_mode(
     cout << "lmdbio: set prov info to MODE_PROV_INFO_ENABLE" << endl;
   else if (prov_info_mode == prov_info_mode_enum::DISABLE)
     cout << "lmdbio: set prov info to MODE_PROV_INFO_DISABLED" << endl;
+  if (collective_mode == collective_mode_enum::INTRANODE)
+    cout << "lmdbio: set collective mode to INTRANODE" << endl;
+  else if (collective_mode == collective_mode_enum::NONE)
+    cout << "lmdbio: set collective mode to NONE" << endl;
+  else if (collective_mode == collective_mode_enum::INTERNODE)
+    cout << "lmdbio: set collective mode to INTERNODE" << endl;
 
   this->dist_mode = dist_mode;
   this->read_mode = read_mode;
   this->prov_info_mode = prov_info_mode;
+  this->collective_mode = collective_mode;
 }
 
 void lmdbio::db::lmdb_touch_pages() {
@@ -1089,19 +1200,22 @@ bool lmdbio::db::is_reader() {
 
 void lmdbio::db::update_buffer_offsets() {
   /* update size offset */
-  if (prov_info_mode == prov_info_mode_enum::ENABLE) {
-    if (is_read_iter())
-      batch_offsets = batch_offsets_addr;
-    else
-      batch_offsets += subbatch_size;
-  }
-  else {
-    int size_offset = (iter == 0) ?
-      0 : (batch_coalescing_size == 1 || is_read_iter() ?
-          subbatch_size * ((batch_coalescing_size * (local_np - 1)) + 1) :
-          subbatch_size);
-    sizes += size_offset;
-    batch_offsets += size_offset;
+  if (collective_mode == collective_mode_enum::NONE ||
+      collective_mode == collective_mode_enum::INTERNODE) {
+    if (prov_info_mode == prov_info_mode_enum::ENABLE) {
+      if (is_read_iter())
+        batch_offsets = batch_offsets_addr;
+      else
+        batch_offsets += subbatch_size;
+    }
+    else {
+      int size_offset = (iter == 0) ?
+        0 : (batch_coalescing_size == 1 || is_read_iter() ?
+            subbatch_size * ((batch_coalescing_size * (local_np - 1)) + 1) :
+            subbatch_size);
+      sizes += size_offset;
+      batch_offsets += size_offset;
+    }
   }
 }
 
@@ -1109,7 +1223,10 @@ void lmdbio::db::update_buffer_offsets() {
 void lmdbio::db::read_record_batch(void) {
   update_buffer_offsets();
   if (is_read_iter())
-    read_all();
+    if (collective_mode == collective_mode_enum::INTRANODE)
+      read_all_mmap();
+    else
+      read_all_dio();
   set_records();
   iter++;
 }
@@ -1130,11 +1247,15 @@ const int lmdbio::db::read_bulk(
   *bulk_bytes = (void*)(subbatch_bytes);
   *bulk_offsets = batch_offsets;
   if (!num_read_batch) {
-    read_all();
+    if (collective_mode == collective_mode_enum::INTRANODE)
+      read_all_mmap();
+    else
+      read_all_dio();
     num_read_batch = batch_coalescing_size;
   }
   num_read_batch -= bulk_read_num_batches;
   iter += bulk_read_num_batches;
+  cout << "lmdbio: done read_bulk" << endl;
   return bulk_read_num_batches * subbatch_size;
 }
 

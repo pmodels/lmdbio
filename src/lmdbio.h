@@ -42,6 +42,10 @@ enum prov_info_mode_enum {
   ENABLE, DISABLE
 };
 
+enum collective_mode_enum {
+  INTRANODE, NONE, INTERNODE
+};
+
 class record {
 public:
   record() {
@@ -212,7 +216,8 @@ public:
   void set_mode(
       dist_mode_enum dist_mode,
       read_mode_enum read_mode,
-      prov_info_mode_enum prov_info_mode);
+      prov_info_mode_enum prov_info_mode,
+      collective_mode_enum collective_mode);
   void set_prov_info(prov_info_t prov_info);
   void set_stagger_size(int stagger_size);
 
@@ -289,6 +294,7 @@ private:
   MPI_Offset* send_batch_offsets;
   MPI_Offset* batch_offsets;
   MPI_Offset* batch_offsets_addr;
+  char** batch_ptrs;
   int* send_sizes;
   int* sizes;
   int batch_size;
@@ -316,6 +322,7 @@ private:
   dist_mode_enum dist_mode;
   read_mode_enum read_mode;
   prov_info_mode_enum prov_info_mode;
+  collective_mode_enum collective_mode;
   char* lmdb_buffer;
   char* meta_buffer;
   int read_pages;
@@ -349,7 +356,9 @@ private:
   int round_up_power_of_two(int num);
   void send_batch();
   void update_buffer_offsets();
-  void read_all();
+  void read_all_mmap();
+  void read_all_dio();
+  void io_barrier();
   void check_diff_batch();
   bool is_reader(int local_rank);
   void set_records();
