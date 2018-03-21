@@ -170,6 +170,8 @@ int lmdbio::db::round_up_power_of_two(int num) {
 }
 
 void lmdbio::db::init_read_params(int sample_size) {
+  int num_read_pages;
+
   /* round sample size to a page unit */
   sample_size = (sample_size & (~(PAGE_SIZE - 1)))
     + (PAGE_SIZE * !!(sample_size % PAGE_SIZE));

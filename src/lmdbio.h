@@ -304,7 +304,6 @@ private:
   MPI_Aint win_size;
   int win_displ;
   int sample_size;
-  int num_read_pages;
   bool is_large_dataset;
   bool is_single_reader_per_node;
   MDB_cursor* cursor;
