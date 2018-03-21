@@ -111,7 +111,7 @@ void lmdbio::db::init(
   iter_time.cursor_restoring_time = 0.0;
   iter_time.cursor_storing_time = 0.0;
   iter_time.barrier_time = 0.0;
-  iter_time.mpi_io_time = 0.0;
+  iter_time.io_time = 0.0;
   iter_time.compute_offset_time = 0.0;
   iter_time.adjust_offset_time = 0.0;
   iter_time.total_bytes_read = 0;
@@ -797,7 +797,7 @@ void lmdbio::db::read_all() {
     int is_done = 0;
 #ifdef BENCHMARK
     struct rusage rstart, rend;
-    double ttime, utime, stime, sltime, start, end, start_, mpi_io_time;
+    double ttime, utime, stime, sltime, start, end, start_;
 
     start_ = MPI_Wtime();
 #endif
@@ -881,9 +881,8 @@ void lmdbio::db::read_all() {
       }
       assert(remaining == 0);
 #ifdef BENCHMARK
-      mpi_io_time = get_elapsed_time(start_, MPI_Wtime());
-      iter_time.mpi_io_time += mpi_io_time;
-      start_ = MPI_Wtime();
+    iter_time.io_time += get_elapsed_time(start_, MPI_Wtime());
+    start_ = MPI_Wtime();
 #endif
       if (prov_info_mode != prov_info_mode_enum::ENABLE) {
         start_offset = batch_offsets[0];

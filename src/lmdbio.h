@@ -171,7 +171,7 @@ struct iter_time_t {
   double mprotect_time;
   double barrier_time;
   double local_barrier_time;
-  double mpi_io_time;
+  double io_time;
   double compute_offset_time;
   double adjust_offset_time;
   double recv_notification_time;
