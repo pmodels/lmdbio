@@ -239,7 +239,7 @@ void lmdbio::db::lmdb_seq_seek() {
   start = MPI_Wtime();
 #endif
 
-  printf("rank %d, seq seek\n");
+  printf("rank %d, seq seek\n", global_rank);
 
   single_fetch_size = fetch_size / prefetch;
   blockcount = max_iter / prefetch;
