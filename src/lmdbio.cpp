@@ -282,7 +282,7 @@ void lmdbio::db::lmdb_seq_seek() {
     for (int i = 0; i < send_buff_size; i++) {
       send_batch_offsets[i] = (char*) lmdb_value_data() - lmdb_buffer;
       send_sizes[i] = lmdb_value_size();
-      printf("rank %d, read item %d size %d at %p\n", reader_id, i, send_sizes[i], send_batch_ptrs[i]);
+      printf("rank %d, read item %d size %d at %p\n", reader_id, i, send_sizes[i], send_batch_offsets[i]);
       lmdb_next();
     }
   }
